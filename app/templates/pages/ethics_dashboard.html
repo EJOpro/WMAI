@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block title %}로그기록 대시보드 - Community Admin{% endblock %}
+
+{% block extra_css %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ethics-dashboard-container">
+    <!-- 헤더 -->
+    <header class="ethics-header">
+        <h1><i class="fas fa-shield-alt"></i> 비윤리 분석 로그 대시보드</h1>
+        <div class="header-actions">
+            <a href="/ethics_analyze" class="btn btn-analyzer">
+                <i class="fas fa-search"></i> 실시간 분석기
+            </a>
+            <button id="refreshBtn" class="btn btn-primary">
+                <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+            <button id="deleteOldBtn" class="btn btn-warning">
+                <i class="fas fa-trash-alt"></i> 오래된 로그 삭제
+            </button>
+        </div>
+    </header>
+
+    <!-- 통계 카드 -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="totalCount">-</h3>
+                <p>총 분석 건수</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="highRiskCount">-</h3>
+                <p>비윤리 고위험 건수</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-envelope-open-text"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="spamCount">-</h3>
+                <p>스팸지수 고위험 건수</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-percentage"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="avgScore">-</h3>
+                <p>평균 비윤리점수</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 필터 및 검색 -->
+    <div class="filters">
+        <div class="filter-group">
+            <label for="scoreFilter">비윤리점수 필터:</label>
+            <select id="scoreFilter">
+                <option value="">전체</option>
+                <option value="0-30">낮음 (0-30)</option>
+                <option value="30-70">보통 (30-70)</option>
+                <option value="70-100">높음 (70-100)</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="spamFilter">스팸지수 필터:</label>
+            <select id="spamFilter">
+                <option value="">전체</option>
+                <option value="0-30">낮음 (0-30)</option>
+                <option value="30-60">보통 (30-60)</option>
+                <option value="60-100">높음 (60-100)</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="dateFilter">기간:</label>
+            <select id="dateFilter">
+                <option value="1">최근 1일</option>
+                <option value="7" selected>최근 7일</option>
+                <option value="30">최근 30일</option>
+                <option value="90">최근 90일</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="searchInput">검색:</label>
+            <input type="text" id="searchInput" placeholder="텍스트 검색...">
+        </div>
+        <div class="filter-group">
+            <button id="applyFilters" class="btn btn-primary">
+                <i class="fas fa-filter"></i> 적용
+            </button>
+        </div>
+    </div>
+
+    <!-- 로그 테이블 -->
+    <div class="table-container">
+        <div class="table-header">
+            <h3><i class="fas fa-list"></i> 분석 로그</h3>
+            <div class="table-actions">
+                <div class="filter-group" style="margin-right: 15px;">
+                    <label for="pageSizeSelect">페이지당 개수:</label>
+                    <select id="pageSizeSelect" style="margin-left: 5px;">
+                        <option value="10">10개씩</option>
+                        <option value="20">20개씩</option>
+                        <option value="30" selected>30개씩</option>
+                        <option value="50">50개씩</option>
+                        <option value="100">100개씩</option>
+                    </select>
+                </div>
+                <span id="logCount">0개</span>
+                <button id="clearFilters" class="btn btn-outline">
+                    <i class="fas fa-times"></i> 필터 초기화
+                </button>
+            </div>
+        </div>
+        <div class="table-wrapper">
+            <table id="logsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>시간</th>
+                        <th>텍스트</th>
+                        <th>비윤리점수 <br>(신뢰도)</th>
+                        <th>스팸지수 <br>(신뢰도)</th>
+                        <th>유형</th>
+                        <th>IP</th>
+                        <th>응답시간</th>
+                        <th>작업</th>
+                    </tr>
+                </thead>
+                <tbody id="logsTableBody">
+                    <!-- 로그 데이터가 여기에 동적으로 추가됩니다 -->
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <button id="firstPage" class="btn btn-outline" disabled>
+                <i class="fas fa-angle-double-left"></i> 처음
+            </button>
+            <button id="prevPage" class="btn btn-outline" disabled>
+                <i class="fas fa-chevron-left"></i> 이전
+            </button>
+            <span id="pageInfo">1 / 1</span>
+            <button id="nextPage" class="btn btn-outline" disabled>
+                다음 <i class="fas fa-chevron-right"></i>
+            </button>
+            <button id="lastPage" class="btn btn-outline" disabled>
+                마지막 <i class="fas fa-angle-double-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 로딩 오버레이 -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>데이터를 불러오는 중...</p>
+        </div>
+    </div>
+</div>
+
+<!-- 모달 (로그 상세보기) -->
+<div id="logModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>로그 상세 정보</h3>
+            <button id="closeModal" class="btn-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body" id="modalBody">
+            <!-- 상세 정보가 여기에 표시됩니다 -->
+        </div>
+    </div>
+</div>
+
+<!-- 삭제 확인 모달 -->
+<div id="deleteModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-exclamation-triangle"></i> 로그 삭제 확인</h3>
+            <button id="closeDeleteModal" class="btn-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <p>정말로 이 로그를 삭제하시겠습니까?</p>
+            <div class="delete-info">
+                <strong>ID:</strong> <span id="deleteLogId">-</span><br>
+                <strong>텍스트:</strong> <span id="deleteLogText">-</span><br>
+                <strong>비윤리점수:</strong> <span id="deleteLogScore">-</span>
+            </div>
+            <div class="modal-actions">
+                <button id="confirmDelete" class="btn btn-danger">
+                    <i class="fas fa-trash"></i> 삭제
+                </button>
+                <button id="cancelDelete" class="btn btn-secondary">
+                    <i class="fas fa-times"></i> 취소
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 오래된 로그 삭제 모달 -->
+<div id="deleteOldModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-calendar-times"></i> 오래된 로그 삭제</h3>
+            <button id="closeDeleteOldModal" class="btn-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <p>지정된 기간보다 오래된 로그를 삭제합니다.</p>
+            <div class="delete-old-info">
+                <div class="form-group">
+                    <label for="deleteDays">삭제 기준 (일):</label>
+                    <select id="deleteDays" class="form-select">
+                        <option value="1">1일 이전</option>
+                        <option value="3">3일 이전</option>
+                        <option value="7">7일 이전</option>
+                        <option value="30" selected>30일 이전</option>
+                        <option value="60">60일 이전</option>
+                        <option value="90">90일 이전</option>
+                        <option value="180">180일 이전</option>
+                        <option value="365">1년 이전</option>
+                        <option value="0">모든 로그 삭제</option>
+                    </select>
+                </div>
+                <div class="delete-preview">
+                    <strong>예상 삭제 건수:</strong> <span id="previewCount">-</span>개
+                </div>
+                <div class="warning-message">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>주의:</strong> 이 작업은 되돌릴 수 없습니다!
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="previewDelete" class="btn btn-info">
+                    <i class="fas fa-eye"></i> 미리보기
+                </button>
+                <button id="confirmDeleteOld" class="btn btn-warning">
+                    <i class="fas fa-trash-alt"></i> 삭제 실행
+                </button>
+                <button id="cancelDeleteOld" class="btn btn-secondary">
+                    <i class="fas fa-times"></i> 취소
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='/js/ethics_dashboard.js') }}"></script>
+{% endblock %}
+

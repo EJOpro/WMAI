@@ -62,3 +62,5 @@ htmlcov/
 *.tmp
 *.temp
 
+# Models
+models/*.pth

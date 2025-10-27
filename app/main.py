@@ -1,11 +1,19 @@
 """
-🚀 FastAPI 메인 서버
+FastAPI 메인 서버
 시니어의 코딩 원칙:
 1. 명확한 주석
 2. 에러 처리
 3. 로깅
 4. 환경 변수 사용
 """
+
+import sys
+import io
+
+# Windows에서 UTF-8 출력 설정
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True)
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -41,14 +49,7 @@ if not STATIC_DIR.exists():
     (STATIC_DIR / "js").mkdir(exist_ok=True)
     (STATIC_DIR / "img").mkdir(exist_ok=True)
 
-# 정적 파일 마운트
-try:
-    app.mount("/static", StaticFiles(directory="app/static"), name="static")
-    print("[OK] 정적 파일 디렉토리 마운트 완료")
-except Exception as e:
-    print(f"[WARN] 정적 파일 마운트 실패: {e}")
-
-# 라우터 등록
+# 라우터 등록 (정적 파일보다 먼저 등록)
 try:
     from app.api import routes_public, routes_health, routes_api
     app.include_router(routes_public.router)
@@ -57,67 +58,13 @@ try:
     print("[OK] 라우터 등록 완료")
 except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
-    # 기본 라우트만 제공
-    pass
 
-# 루트 경로 (메인 페이지)
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    """메인 페이지 - index_main.html 반환"""
-    html_file = Path("index_main.html")
-    if html_file.exists():
-        return FileResponse("index_main.html")
-    
-    # 파일이 없으면 간단한 웰컴 페이지
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Community Admin</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-            }
-            .container {
-                text-align: center;
-                background: rgba(255,255,255,0.1);
-                padding: 40px;
-                border-radius: 20px;
-                backdrop-filter: blur(10px);
-            }
-            h1 { margin: 0 0 20px 0; }
-            a {
-                color: white;
-                text-decoration: none;
-                background: rgba(255,255,255,0.2);
-                padding: 10px 20px;
-                border-radius: 5px;
-                display: inline-block;
-                margin: 5px;
-            }
-            a:hover { background: rgba(255,255,255,0.3); }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>FastAPI Server Running!</h1>
-            <p>Community Admin Dashboard</p>
-            <div style="margin-top: 20px;">
-                <a href="/docs">API Documentation</a>
-                <a href="/health">Health Check</a>
-                <a href="/test.html">Test Page</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+# 정적 파일 마운트 (라우터보다 나중에 마운트하여 라우트 우선순위 확보)
+try:
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
+    print("[OK] 정적 파일 디렉토리 마운트 완료")
+except Exception as e:
+    print(f"[WARN] 정적 파일 마운트 실패: {e}")
 
 # 시작 이벤트
 @app.on_event("startup")
@@ -129,6 +76,11 @@ async def startup_event():
     print("API Docs: http://localhost:8000/docs")
     print("Health: http://localhost:8000/health")
     print("="*50 + "\n")
+    
+    # Ethics 분석기 초기화는 지연 로딩 방식으로 변경
+    # API 호출 시점에 초기화되므로 서버 시작을 막지 않음
+    print("[INFO] Ethics 분석기는 최초 API 호출 시 초기화됩니다.")
+    print("       (BERT 모델 로딩으로 인한 시작 지연을 방지하기 위함)")
 
 # 종료 이벤트
 @app.on_event("shutdown")
