@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>홈 - Community Admin</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+</head>
+<body style="background-color: #F9FAFB;">
+    <main class="container">
+<div class="hero-section">
+    <img src="/static/img/sub_home.png" alt="Community Admin Logo" style="width: 400px; max-width: 90%; height: auto; margin: 0 auto 30px; display: block; filter: drop-shadow(0 10px 20px rgba(0,0,0,0.1));">
+    <p>커뮤니티 관리 대시보드</p>
+</div>
+
+<div class="search-section">
+    <div class="search-box">
+        <input 
+            type="text" 
+            id="searchInput" 
+            class="search-input" 
+            placeholder="육아에 대한 게시글을 찾아줘"
+            autocomplete="off"
+        />
+        <button id="searchBtn" class="btn btn-primary">검색</button>
+    </div>
+    <div id="searchResults" class="search-results"></div>
+</div>
+
+<div class="features-grid">
+    <div class="feature-card">
+        <img src="/static/img/api-console.png" alt="API Console" style="width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain;">
+        <h3>API 콘솔</h3>
+        <p>API 요청 테스트</p>
+        <a href="/api-console" class="btn btn-secondary">이동</a>
+    </div>
+    
+    <div class="feature-card">
+        <img src="/static/img/bounce.png" alt="Bounce Rate" style="width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain;">
+        <h3>이탈률 분석</h3>
+        <p>방문객 이탈률 통계</p>
+        <a href="/bounce" class="btn btn-secondary">이동</a>
+    </div>
+    
+    <div class="feature-card">
+        <img src="/static/img/trends.png" alt="Trends" style="width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain;">
+        <h3>트렌드 분석</h3>
+        <p>키워드 및 트래픽 추이</p>
+        <a href="/trends" class="btn btn-secondary">이동</a>
+    </div>
+    
+    <div class="feature-card">
+        <img src="/static/img/reports.png" alt="Reports" style="width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain;">
+        <h3>신고 분류</h3>
+        <p>신고글 카테고리별 통계</p>
+        <a href="/reports" class="btn btn-secondary">이동</a>
+    </div>
+    
+    <div class="feature-card">
+        <img src="/static/img/hate.png" alt="Hate Score" style="width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain;">
+        <h3>혐오지수 평가</h3>
+        <p>게시글 혐오 표현 분석</p>
+        <a href="/hate" class="btn btn-secondary">이동</a>
+    </div>
+</div>
+    </main>
+
+    <script src="{{ url_for('static', path='/js/app.js') }}"></script>
+<script>
+    // Placeholder 애니메이션
+    const placeholders = [
+        '육아에 대한 게시글을 찾아줘',
+        '최근 인기 있는 주제는 뭐야?',
+        '오늘 신고가 많은 게시글 보여줘',
+        '감정적인 댓글이 많은 글 찾아줘',
+        '커뮤니티에서 논란이 많은 주제는?',
+        '최근 일주일간 조회수가 높은 글',
+        '긍정적인 반응이 많은 게시물'
+    ];
+    
+    let currentIndex = 0;
+    const searchInput = document.getElementById('searchInput');
+    
+    setInterval(() => {
+        if (!searchInput.value) {
+            currentIndex = (currentIndex + 1) % placeholders.length;
+            searchInput.placeholder = placeholders[currentIndex];
+        }
+    }, 2000);
+
+    // 검색 기능
+    document.getElementById('searchBtn').addEventListener('click', performSearch);
+    document.getElementById('searchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') performSearch();
+    });
+
+    async function performSearch() {
+        const query = document.getElementById('searchInput').value.trim();
+        if (!query) {
+            showAlert('검색어를 입력하세요', 'warning');
+            return;
+        }
+
+        const resultsDiv = document.getElementById('searchResults');
+        resultsDiv.innerHTML = '<div class="loading">검색 중...</div>';
+
+        try {
+            const response = await apiRequest(`/api/search?q=${encodeURIComponent(query)}`);
+            displaySearchResults(response);
+        } catch (error) {
+            resultsDiv.innerHTML = `<div class="error">검색 실패: ${error.message}</div>`;
+        }
+    }
+
+    function displaySearchResults(data) {
+        const resultsDiv = document.getElementById('searchResults');
+        
+        if (!data || !data.results || data.results.length === 0) {
+            resultsDiv.innerHTML = '<div class="no-results">검색 결과가 없습니다.</div>';
+            return;
+        }
+
+        const html = `
+            <div class="results-header">
+                <h3>검색 결과 (${data.results.length}건)</h3>
+            </div>
+            <div class="results-list">
+                ${data.results.map(item => `
+                    <div class="result-item">
+                        <h4>${item.title || '제목 없음'}</h4>
+                        <p>${item.content || item.description || ''}</p>
+                        <div class="result-meta">
+                            <span>작성일: ${item.date || 'N/A'}</span>
+                            <span>작성자: ${item.author || 'Anonymous'}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        
+        resultsDiv.innerHTML = html;
+    }
+</script>
+</body>
+</html>

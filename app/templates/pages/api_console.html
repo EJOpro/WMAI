@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}API 콘솔 - Community Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>API 콘솔</h1>
+    <p>API 요청 테스트 및 응답 확인</p>
+</div>
+
+<div class="console-container">
+    <div class="console-form">
+        <div class="form-group">
+            <label for="method">HTTP 메서드</label>
+            <select id="method" class="form-control">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="endpoint">엔드포인트</label>
+            <input 
+                type="text" 
+                id="endpoint" 
+                class="form-control" 
+                placeholder="/api/search?q=example"
+                value="/api/search?q=test"
+            />
+        </div>
+
+        <div class="form-group">
+            <label for="requestBody">요청 본문 (JSON)</label>
+            <textarea 
+                id="requestBody" 
+                class="form-control code-editor" 
+                rows="8"
+                placeholder='{"key": "value"}'
+            ></textarea>
+        </div>
+
+        <button id="sendRequest" class="btn btn-primary btn-large">요청 보내기</button>
+    </div>
+
+    <div class="console-response">
+        <h3>응답</h3>
+        <div class="response-meta" id="responseMeta"></div>
+        <pre id="responseBody" class="code-block">여기에 응답이 표시됩니다.</pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.getElementById('sendRequest').addEventListener('click', async function() {
+        const method = document.getElementById('method').value;
+        const endpoint = document.getElementById('endpoint').value;
+        const bodyText = document.getElementById('requestBody').value.trim();
+        
+        const metaDiv = document.getElementById('responseMeta');
+        const bodyDiv = document.getElementById('responseBody');
+        
+        metaDiv.innerHTML = '<div class="loading">요청 중...</div>';
+        bodyDiv.textContent = '';
+
+        const startTime = Date.now();
+
+        try {
+            let body = null;
+            if (bodyText && (method === 'POST' || method === 'PUT')) {
+                try {
+                    body = JSON.parse(bodyText);
+                } catch (e) {
+                    throw new Error('Invalid JSON in request body');
+                }
+            }
+
+            const response = await apiRequest(endpoint, {
+                method,
+                body: body ? JSON.stringify(body) : undefined
+            });
+
+            const duration = Date.now() - startTime;
+            
+            metaDiv.innerHTML = `
+                <div class="response-success">
+                    <span>✓ 성공</span>
+                    <span>응답 시간: ${duration}ms</span>
+                </div>
+            `;
+            
+            bodyDiv.textContent = JSON.stringify(response, null, 2);
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            
+            metaDiv.innerHTML = `
+                <div class="response-error">
+                    <span>✕ 실패</span>
+                    <span>응답 시간: ${duration}ms</span>
+                </div>
+            `;
+            
+            bodyDiv.textContent = JSON.stringify({
+                error: error.message,
+                details: error.toString()
+            }, null, 2);
+        }
+    });
+</script>
+{% endblock %}
+

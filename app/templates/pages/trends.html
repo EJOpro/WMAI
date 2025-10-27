@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}트렌드 분석 - Community Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>트렌드 대시보드</h1>
+    <p>주요 트렌드 및 키워드 분석</p>
+</div>
+
+<div class="dashboard-container">
+    <div class="trends-summary">
+        <h3>트렌드 요약</h3>
+        <div id="trendsSummary" class="loading">데이터 로딩 중...</div>
+    </div>
+
+    <div class="keywords-section">
+        <h3>인기 키워드</h3>
+        <div id="keywordsCloud" class="keywords-cloud"></div>
+    </div>
+
+    <div class="traffic-chart">
+        <h3>트래픽 추이</h3>
+        <canvas id="trafficChart"></canvas>
+    </div>
+
+    <div class="trends-table">
+        <h3>상세 트렌드</h3>
+        <table id="trendsTable">
+            <thead>
+                <tr>
+                    <th>순위</th>
+                    <th>키워드</th>
+                    <th>언급 수</th>
+                    <th>증감률</th>
+                    <th>카테고리</th>
+                </tr>
+            </thead>
+            <tbody id="trendsTableBody">
+                <tr><td colspan="5" class="loading">데이터 로딩 중...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadTrendsData() {
+        try {
+            const data = await apiRequest('/api/trends');
+            updateTrendsSummary(data);
+            updateKeywordsCloud(data);
+            updateTrendsTable(data);
+        } catch (error) {
+            showAlert('데이터 로딩 실패: ' + error.message, 'error');
+        }
+    }
+
+    function updateTrendsSummary(data) {
+        const summaryDiv = document.getElementById('trendsSummary');
+        
+        if (!data || !data.summary) {
+            summaryDiv.innerHTML = '<p>요약 데이터가 없습니다.</p>';
+            return;
+        }
+
+        const summary = data.summary;
+        summaryDiv.innerHTML = `
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span class="summary-label">총 트렌드</span>
+                    <span class="summary-value">${summary.total_trends || 0}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">신규 트렌드</span>
+                    <span class="summary-value">${summary.new_trends || 0}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">상승 트렌드</span>
+                    <span class="summary-value">${summary.rising_trends || 0}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    function updateKeywordsCloud(data) {
+        const cloudDiv = document.getElementById('keywordsCloud');
+        
+        if (!data || !data.keywords || data.keywords.length === 0) {
+            cloudDiv.innerHTML = '<p>키워드 데이터가 없습니다.</p>';
+            return;
+        }
+
+        cloudDiv.innerHTML = data.keywords.map(keyword => {
+            const size = Math.min(Math.max(keyword.count / 10, 1), 3);
+            return `<span class="keyword-tag" style="font-size: ${size}rem;">${keyword.word}</span>`;
+        }).join('');
+    }
+
+    function updateTrendsTable(data) {
+        const tbody = document.getElementById('trendsTableBody');
+        
+        if (!data || !data.trends || data.trends.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">트렌드 데이터가 없습니다.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.trends.map((trend, index) => `
+            <tr>
+                <td>${index + 1}</td>
+                <td><strong>${trend.keyword || 'N/A'}</strong></td>
+                <td>${(trend.mentions || 0).toLocaleString()}</td>
+                <td class="${trend.change >= 0 ? 'positive' : 'negative'}">
+                    ${trend.change >= 0 ? '▲' : '▼'} ${Math.abs(trend.change || 0).toFixed(1)}%
+                </td>
+                <td>${trend.category || 'N/A'}</td>
+            </tr>
+        `).join('');
+    }
+
+    loadTrendsData();
+</script>
+{% endblock %}
+

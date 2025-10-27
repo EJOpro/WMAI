@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}방문객 이탈률 - Community Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>방문객 이탈률 대시보드</h1>
+    <p>방문자 이탈률 데이터 시각화</p>
+</div>
+
+<div class="dashboard-container">
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">평균 이탈률</div>
+            <div class="stat-value" id="avgBounce">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">총 방문자</div>
+            <div class="stat-value" id="totalVisitors">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">이탈 방문자</div>
+            <div class="stat-value" id="bouncedVisitors">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">데이터 기간</div>
+            <div class="stat-value" id="dataPeriod">-</div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="bounceChart"></canvas>
+    </div>
+
+    <div class="data-table">
+        <h3>상세 데이터</h3>
+        <table id="bounceTable">
+            <thead>
+                <tr>
+                    <th>날짜</th>
+                    <th>방문자 수</th>
+                    <th>이탈 수</th>
+                    <th>이탈률</th>
+                </tr>
+            </thead>
+            <tbody id="bounceTableBody">
+                <tr><td colspan="4" class="loading">데이터 로딩 중...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadBounceData() {
+        try {
+            const data = await apiRequest('/api/metrics/bounce');
+            updateBounceStats(data);
+            updateBounceTable(data);
+            // 차트는 Chart.js 라이브러리 추가 시 구현
+        } catch (error) {
+            showAlert('데이터 로딩 실패: ' + error.message, 'error');
+        }
+    }
+
+    function updateBounceStats(data) {
+        if (!data || !data.metrics) return;
+        
+        const metrics = data.metrics;
+        document.getElementById('avgBounce').textContent = (metrics.avg_bounce_rate || 0).toFixed(1) + '%';
+        document.getElementById('totalVisitors').textContent = (metrics.total_visitors || 0).toLocaleString();
+        document.getElementById('bouncedVisitors').textContent = (metrics.bounced_visitors || 0).toLocaleString();
+        document.getElementById('dataPeriod').textContent = metrics.period || 'N/A';
+    }
+
+    function updateBounceTable(data) {
+        const tbody = document.getElementById('bounceTableBody');
+        
+        if (!data || !data.details || data.details.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">데이터가 없습니다.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.details.map(item => `
+            <tr>
+                <td>${item.date || 'N/A'}</td>
+                <td>${(item.visitors || 0).toLocaleString()}</td>
+                <td>${(item.bounced || 0).toLocaleString()}</td>
+                <td>${(item.bounce_rate || 0).toFixed(1)}%</td>
+            </tr>
+        `).join('');
+    }
+
+    // 페이지 로드 시 데이터 가져오기
+    loadBounceData();
+</script>
+{% endblock %}
+

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}신고글 분류 - Community Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>신고글 분류평가</h1>
+    <p>카테고리별 신고글 통계</p>
+</div>
+
+<div class="dashboard-container">
+    <div class="reports-stats">
+        <div class="stat-card">
+            <div class="stat-label">총 신고 건수</div>
+            <div class="stat-value" id="totalReports">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">처리 대기</div>
+            <div class="stat-value" id="pendingReports">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">처리 완료</div>
+            <div class="stat-value" id="resolvedReports">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">반려</div>
+            <div class="stat-value" id="rejectedReports">-</div>
+        </div>
+    </div>
+
+    <div class="reports-chart">
+        <h3>카테고리별 분포</h3>
+        <canvas id="reportsChart"></canvas>
+    </div>
+
+    <div class="reports-table">
+        <h3>카테고리별 상세 통계</h3>
+        <table id="reportsTable">
+            <thead>
+                <tr>
+                    <th>카테고리</th>
+                    <th>신고 수</th>
+                    <th>비율</th>
+                    <th>평균 처리 시간</th>
+                    <th>상태</th>
+                </tr>
+            </thead>
+            <tbody id="reportsTableBody">
+                <tr><td colspan="5" class="loading">데이터 로딩 중...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadReportsData() {
+        try {
+            const data = await apiRequest('/api/reports/moderation');
+            updateReportsStats(data);
+            updateReportsTable(data);
+        } catch (error) {
+            showAlert('데이터 로딩 실패: ' + error.message, 'error');
+        }
+    }
+
+    function updateReportsStats(data) {
+        if (!data || !data.stats) return;
+        
+        const stats = data.stats;
+        document.getElementById('totalReports').textContent = (stats.total || 0).toLocaleString();
+        document.getElementById('pendingReports').textContent = (stats.pending || 0).toLocaleString();
+        document.getElementById('resolvedReports').textContent = (stats.resolved || 0).toLocaleString();
+        document.getElementById('rejectedReports').textContent = (stats.rejected || 0).toLocaleString();
+    }
+
+    function updateReportsTable(data) {
+        const tbody = document.getElementById('reportsTableBody');
+        
+        if (!data || !data.categories || data.categories.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">데이터가 없습니다.</td></tr>';
+            return;
+        }
+
+        const total = data.categories.reduce((sum, cat) => sum + (cat.count || 0), 0);
+
+        tbody.innerHTML = data.categories.map(category => {
+            const percentage = total > 0 ? ((category.count / total) * 100).toFixed(1) : 0;
+            return `
+                <tr>
+                    <td><strong>${category.name || 'N/A'}</strong></td>
+                    <td>${(category.count || 0).toLocaleString()}</td>
+                    <td>${percentage}%</td>
+                    <td>${category.avg_processing_time || 'N/A'}</td>
+                    <td><span class="status-badge status-${category.status}">${category.status || 'N/A'}</span></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    loadReportsData();
+</script>
+{% endblock %}
+
