@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>키워드 분석 대시보드 - TrendStream</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/WordCloud.min.js"></script>
+    <style>
+        .keyword-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .stats-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            border-left: 4px solid #667eea;
+        }
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        .wordcloud-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        .keyword-badge {
+            display: inline-block;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            margin: 4px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .refresh-btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: 500;
+        }
+        .refresh-btn:hover {
+            background: linear-gradient(45deg, #5a6fd8, #6a4190);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- 헤더 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="keyword-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h2><i class="fas fa-chart-line me-2"></i>키워드 분석 대시보드</h2>
+                            <p class="mb-0">커뮤니티 게시물의 키워드 트렌드를 실시간으로 분석합니다</p>
+                        </div>
+                        <button class="btn refresh-btn" onclick="refreshData()">
+                            <i class="fas fa-sync-alt me-2"></i>새로고침
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 필터 섹션 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="stats-card">
+                    <h5><i class="fas fa-filter me-2"></i>분석 필터</h5>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label class="form-label">시작 날짜</label>
+                            <input type="datetime-local" class="form-control" id="startDate">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">종료 날짜</label>
+                            <input type="datetime-local" class="form-control" id="endDate">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">커뮤니티</label>
+                            <select class="form-select" id="communityFilter">
+                                <option value="">전체</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">게시판</label>
+                            <select class="form-select" id="boardFilter">
+                                <option value="">전체</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <label class="form-label">키워드 (쉼표로 구분)</label>
+                            <input type="text" class="form-control" id="keywords" placeholder="예: AI,창작,드래곤">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">집계 단위</label>
+                            <select class="form-select" id="granularity">
+                                <option value="1h">1시간</option>
+                                <option value="1d" selected>1일</option>
+                                <option value="1w">1주</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <button class="btn btn-primary w-100" onclick="applyFilters()">
+                                <i class="fas fa-search me-2"></i>분석 실행
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 통계 카드 -->
+        <div class="row" id="statsRow">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <i class="fas fa-file-alt fa-2x text-primary"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">총 게시글</h6>
+                            <h4 class="mb-0" id="totalPosts">-</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <i class="fas fa-comments fa-2x text-success"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">총 댓글</h6>
+                            <h4 class="mb-0" id="totalComments">-</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <i class="fas fa-tags fa-2x text-warning"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">추출된 키워드</h6>
+                            <h4 class="mb-0" id="totalKeywords">-</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <i class="fas fa-fire fa-2x text-danger"></i>
+                        </div>
+                        <div>
+                            <h6 class="text-muted mb-1">인기 키워드</h6>
+                            <h4 class="mb-0" id="topKeyword">-</h4>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 워드클라우드 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="wordcloud-container">
+                    <h5><i class="fas fa-cloud me-2"></i>워드클라우드</h5>
+                    <div id="wordcloud" style="height: 400px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 키워드 타임라인 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="chart-container">
+                    <h5><i class="fas fa-chart-line me-2"></i>키워드 타임라인</h5>
+                    <canvas id="timelineChart" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 상위 키워드 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="chart-container">
+                    <h5><i class="fas fa-trophy me-2"></i>상위 키워드</h5>
+                    <div id="topKeywords"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const API_KEY = 'dev_api_key_12345';
+        
+        let timelineChart = null;
+        let wordcloudInstance = null;
+
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeDates();
+            loadCommunities();
+            refreshData();
+        });
+
+        // 날짜 초기화 (최근 7일)
+        function initializeDates() {
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            
+            document.getElementById('startDate').value = weekAgo.toISOString().slice(0, 16);
+            document.getElementById('endDate').value = now.toISOString().slice(0, 16);
+        }
+
+        // 커뮤니티 목록 로드
+        async function loadCommunities() {
+            try {
+                const response = await fetch(`${API_BASE}/v1/community/communities?api_key=${API_KEY}`);
+                const communities = await response.json();
+                
+                const select = document.getElementById('communityFilter');
+                select.innerHTML = '<option value="">전체</option>';
+                
+                communities.forEach(community => {
+                    const option = document.createElement('option');
+                    option.value = community.community_name;
+                    option.textContent = `${community.community_name} (${community.post_count}개 게시글)`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('커뮤니티 목록 로드 실패:', error);
+            }
+        }
+
+        // 데이터 새로고침
+        async function refreshData() {
+            await Promise.all([
+                loadWordcloud(),
+                loadTimeline(),
+                loadStats()
+            ]);
+        }
+
+        // 워드클라우드 로드
+        async function loadWordcloud() {
+            try {
+                const start = document.getElementById('startDate').value;
+                const end = document.getElementById('endDate').value;
+                const community = document.getElementById('communityFilter').value;
+                const board = document.getElementById('boardFilter').value;
+
+                if (!start || !end) {
+                    showError('시작 날짜와 종료 날짜를 선택해주세요.');
+                    return;
+                }
+
+                const params = new URLSearchParams({
+                    start: new Date(start).toISOString(),
+                    end: new Date(end).toISOString(),
+                    top_k: 50
+                });
+
+                if (community) params.append('community', community);
+                if (board) params.append('board', board);
+
+                const response = await fetch(`${API_BASE}/v1/community/wordcloud?${params}&api_key=${API_KEY}`);
+                const data = await response.json();
+
+                if (data.words && data.words.length > 0) {
+                    renderWordcloud(data.words);
+                    updateStats(data.total_posts, data.total_comments, data.words.length);
+                } else {
+                    document.getElementById('wordcloud').innerHTML = '<p class="text-muted">데이터가 없습니다.</p>';
+                }
+            } catch (error) {
+                console.error('워드클라우드 로드 실패:', error);
+                showError('워드클라우드 데이터를 불러올 수 없습니다.');
+            }
+        }
+
+        // 워드클라우드 렌더링
+        function renderWordcloud(words) {
+            const container = document.getElementById('wordcloud');
+            container.innerHTML = '';
+
+            if (wordcloudInstance) {
+                wordcloudInstance = null;
+            }
+
+            if (words.length === 0) {
+                container.innerHTML = '<p class="text-muted">표시할 키워드가 없습니다.</p>';
+                return;
+            }
+
+            // WordCloud.js 설정
+            const wordcloudData = words.map(word => [word.word, word.frequency]);
+            
+            wordcloudInstance = WordCloud(container, {
+                list: wordcloudData,
+                weightFactor: 20,
+                fontFamily: 'Noto Sans KR, sans-serif',
+                color: function() {
+                    const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe'];
+                    return colors[Math.floor(Math.random() * colors.length)];
+                },
+                backgroundColor: '#ffffff',
+                gridSize: 8,
+                minSize: 12,
+                maxSize: 60
+            });
+        }
+
+        // 타임라인 로드
+        async function loadTimeline() {
+            try {
+                const start = document.getElementById('startDate').value;
+                const end = document.getElementById('endDate').value;
+                const keywords = document.getElementById('keywords').value;
+                const granularity = document.getElementById('granularity').value;
+                const community = document.getElementById('communityFilter').value;
+                const board = document.getElementById('boardFilter').value;
+
+                if (!start || !end) {
+                    return;
+                }
+
+                if (!keywords.trim()) {
+                    document.getElementById('timelineChart').style.display = 'none';
+                    return;
+                }
+
+                const params = new URLSearchParams({
+                    start: new Date(start).toISOString(),
+                    end: new Date(end).toISOString(),
+                    keywords: keywords,
+                    granularity: granularity
+                });
+
+                if (community) params.append('community', community);
+                if (board) params.append('board', board);
+
+                const response = await fetch(`${API_BASE}/v1/community/timeline?${params}&api_key=${API_KEY}`);
+                const data = await response.json();
+
+                if (data.series && data.series.length > 0) {
+                    renderTimeline(data.series);
+                } else {
+                    document.getElementById('timelineChart').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('타임라인 로드 실패:', error);
+            }
+        }
+
+        // 타임라인 차트 렌더링
+        function renderTimeline(series) {
+            const ctx = document.getElementById('timelineChart').getContext('2d');
+            document.getElementById('timelineChart').style.display = 'block';
+
+            if (timelineChart) {
+                timelineChart.destroy();
+            }
+
+            const colors = [
+                '#667eea', '#764ba2', '#f093fb', '#f5576c', 
+                '#4facfe', '#00f2fe', '#43e97b', '#38f9d7'
+            ];
+
+            const datasets = series.map((s, index) => ({
+                label: s.keyword,
+                data: s.points.map(point => ({
+                    x: point.ts,
+                    y: point.count
+                })),
+                borderColor: colors[index % colors.length],
+                backgroundColor: colors[index % colors.length] + '20',
+                fill: false,
+                tension: 0.1
+            }));
+
+            timelineChart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: series[0]?.points[0]?.ts.includes('T') ? 'day' : 'hour'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // 통계 로드
+        async function loadStats() {
+            // 이미 워드클라우드에서 로드됨
+        }
+
+        // 통계 업데이트
+        function updateStats(totalPosts, totalComments, keywordCount) {
+            document.getElementById('totalPosts').textContent = totalPosts.toLocaleString();
+            document.getElementById('totalComments').textContent = totalComments.toLocaleString();
+            document.getElementById('totalKeywords').textContent = keywordCount;
+        }
+
+        // 상위 키워드 표시
+        function showTopKeywords(words) {
+            const container = document.getElementById('topKeywords');
+            container.innerHTML = '';
+
+            words.slice(0, 20).forEach(word => {
+                const badge = document.createElement('span');
+                badge.className = 'keyword-badge';
+                badge.textContent = `${word.word} (${word.frequency})`;
+                badge.style.fontSize = Math.max(12, Math.min(20, word.frequency / 5)) + 'px';
+                container.appendChild(badge);
+            });
+        }
+
+        // 필터 적용
+        function applyFilters() {
+            refreshData();
+        }
+
+        // 에러 표시
+        function showError(message) {
+            alert('오류: ' + message);
+        }
+
+        // 자동 새로고침 (5분마다)
+        setInterval(refreshData, 5 * 60 * 1000);
+
+        console.log('📊 키워드 분석 대시보드 로드 완료!');
+        console.log('🔄 5분마다 자동 새로고침됩니다.');
+    </script>
+</body>
+</html>

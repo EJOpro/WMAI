@@ -8,6 +8,107 @@
     <p>API 요청 테스트 및 응답 확인</p>
 </div>
 
+<!-- Trends API 예시 섹션 -->
+<div class="api-examples-section">
+    <h2>📊 Trends API 예시</h2>
+    <p>아래는 트렌드 분석 API의 주요 엔드포인트와 사용 예시입니다.</p>
+    
+    <div class="api-examples-grid">
+        <!-- 1. Timeseries API -->
+        <div class="api-example-card">
+            <h3>📈 1. 시계열 트렌드 조회</h3>
+            <p class="api-description">시간별 트렌드 데이터를 조회합니다.</p>
+            
+            <div class="api-endpoint">
+                <span class="method-badge method-get">GET</span>
+                <code>/v1/trends/timeseries</code>
+            </div>
+            
+            <div class="api-params">
+                <h4>파라미터</h4>
+                <ul>
+                    <li><code>start</code> - 시작 시각 (ISO8601 UTC)</li>
+                    <li><code>end</code> - 종료 시각 (ISO8601 UTC)</li>
+                    <li><code>granularity</code> - 집계 단위 (1h, 1d, 1w)</li>
+                    <li><code>metric</code> - 지표 (pv, uv, sessions)</li>
+                    <li><code>group_by</code> - 그룹화 차원 (page, device, country)</li>
+                </ul>
+            </div>
+            
+            <button onclick="loadExample('timeseries')" class="btn btn-secondary">예시 불러오기</button>
+        </div>
+
+        <!-- 2. Anomalies API -->
+        <div class="api-example-card">
+            <h3>⚠️ 2. 이상 탐지</h3>
+            <p class="api-description">시계열 데이터에서 이상점을 탐지합니다.</p>
+            
+            <div class="api-endpoint">
+                <span class="method-badge method-get">GET</span>
+                <code>/v1/trends/anomalies</code>
+            </div>
+            
+            <div class="api-params">
+                <h4>파라미터</h4>
+                <ul>
+                    <li><code>start</code> - 시작 시각 (ISO8601 UTC)</li>
+                    <li><code>end</code> - 종료 시각 (ISO8601 UTC)</li>
+                    <li><code>granularity</code> - 집계 단위 (1h, 1d)</li>
+                    <li><code>metric</code> - 지표 (pv, uv, sessions)</li>
+                    <li><code>threshold</code> - 임계값 (표준편차 배수, 1.0-5.0)</li>
+                </ul>
+            </div>
+            
+            <button onclick="loadExample('anomalies')" class="btn btn-secondary">예시 불러오기</button>
+        </div>
+
+        <!-- 3. Forecast API -->
+        <div class="api-example-card">
+            <h3>🔮 3. 예측</h3>
+            <p class="api-description">미래 트렌드를 예측합니다.</p>
+            
+            <div class="api-endpoint">
+                <span class="method-badge method-get">GET</span>
+                <code>/v1/trends/forecast</code>
+            </div>
+            
+            <div class="api-params">
+                <h4>파라미터</h4>
+                <ul>
+                    <li><code>start</code> - 예측 시작 시각 (ISO8601 UTC)</li>
+                    <li><code>granularity</code> - 집계 단위 (1h, 1d)</li>
+                    <li><code>metric</code> - 지표 (pv, uv, sessions)</li>
+                    <li><code>horizon_days</code> - 예측 수평선 (1-30일)</li>
+                </ul>
+            </div>
+            
+            <button onclick="loadExample('forecast')" class="btn btn-secondary">예시 불러오기</button>
+        </div>
+
+        <!-- 4. Search Keywords API -->
+        <div class="api-example-card">
+            <h3>🔥 4. 인기 검색어 랭킹</h3>
+            <p class="api-description">가장 많이 검색된 키워드를 조회합니다.</p>
+            
+            <div class="api-endpoint">
+                <span class="method-badge method-get">GET</span>
+                <code>/v1/trends/search-keywords</code>
+            </div>
+            
+            <div class="api-params">
+                <h4>파라미터</h4>
+                <ul>
+                    <li><code>start</code> - 시작 시각 (ISO8601 UTC)</li>
+                    <li><code>end</code> - 종료 시각 (ISO8601 UTC)</li>
+                    <li><code>top_k</code> - 상위 K개 검색어 (1-100)</li>
+                </ul>
+            </div>
+            
+            <button onclick="loadExample('search-keywords')" class="btn btn-secondary">예시 불러오기</button>
+        </div>
+    </div>
+</div>
+
 <div class="console-container">
     <div class="console-form">
         <div class="form-group">
@@ -52,8 +153,283 @@
 </div>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+    .api-examples-section {
+        margin-bottom: 3rem;
+    }
+    
+    .api-examples-section h2 {
+        margin-bottom: 0.5rem;
+    }
+    
+    .api-examples-section > p {
+        color: var(--text-light);
+        margin-bottom: 2rem;
+    }
+    
+    .api-examples-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .api-example-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        box-shadow: var(--shadow);
+        border-left: 4px solid var(--primary-color);
+    }
+    
+    .api-example-card h3 {
+        margin-bottom: 0.5rem;
+        font-size: 1.25rem;
+    }
+    
+    .api-description {
+        color: var(--text-light);
+        font-size: 0.875rem;
+        margin-bottom: 1rem;
+    }
+    
+    .api-endpoint {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: var(--bg-color);
+        border-radius: 0.375rem;
+    }
+    
+    .api-endpoint code {
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        color: var(--text-color);
+    }
+    
+    .method-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: white;
+    }
+    
+    .method-get {
+        background: var(--secondary-color);
+    }
+    
+    .method-post {
+        background: var(--primary-color);
+    }
+    
+    .api-params {
+        margin-bottom: 1rem;
+    }
+    
+    .api-params h4 {
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+        color: var(--text-light);
+    }
+    
+    .api-params ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .api-params li {
+        padding: 0.25rem 0;
+        font-size: 0.875rem;
+    }
+    
+    .api-params code {
+        background: var(--bg-color);
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-family: 'Courier New', monospace;
+        font-size: 0.813rem;
+        color: var(--primary-color);
+        font-weight: 600;
+    }
+    
+    @media (max-width: 1024px) {
+        .api-examples-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block extra_js %}
 <script>
+    // API 예시 불러오기 함수
+    function loadExample(exampleType) {
+        const methodSelect = document.getElementById('method');
+        const endpointInput = document.getElementById('endpoint');
+        const requestBodyArea = document.getElementById('requestBody');
+        const responseBodyDiv = document.getElementById('responseBody');
+        
+        methodSelect.value = 'GET';
+        requestBodyArea.value = '';
+        
+        const examples = {
+            'timeseries': {
+                endpoint: '/v1/trends/timeseries?start=2025-01-20T00:00:00Z&end=2025-01-27T00:00:00Z&granularity=1d&metric=pv&group_by=page',
+                response: {
+                    "status": "success",
+                    "data": {
+                        "timeseries": [
+                            {
+                                "timestamp": "2025-01-20T00:00:00Z",
+                                "page": "/home",
+                                "pv": 15234
+                            },
+                            {
+                                "timestamp": "2025-01-21T00:00:00Z",
+                                "page": "/home",
+                                "pv": 18567
+                            },
+                            {
+                                "timestamp": "2025-01-22T00:00:00Z",
+                                "page": "/home",
+                                "pv": 21450
+                            }
+                        ],
+                        "total_records": 168,
+                        "granularity": "1d"
+                    }
+                }
+            },
+            'anomalies': {
+                endpoint: '/v1/trends/anomalies?start=2025-01-20T00:00:00Z&end=2025-01-27T00:00:00Z&granularity=1h&metric=pv&threshold=2.5',
+                response: {
+                    "status": "success",
+                    "data": {
+                        "anomalies": [
+                            {
+                                "timestamp": "2025-01-22T03:00:00Z",
+                                "metric": "pv",
+                                "value": 5234,
+                                "expected": 1250,
+                                "deviation": 3.2,
+                                "severity": "high"
+                            },
+                            {
+                                "timestamp": "2025-01-24T14:00:00Z",
+                                "metric": "pv",
+                                "value": 423,
+                                "expected": 1890,
+                                "deviation": -2.8,
+                                "severity": "medium"
+                            }
+                        ],
+                        "total_anomalies": 2,
+                        "threshold": 2.5
+                    }
+                }
+            },
+            'forecast': {
+                endpoint: '/v1/trends/forecast?start=2025-01-28T00:00:00Z&granularity=1d&metric=pv&horizon_days=7',
+                response: {
+                    "status": "success",
+                    "data": {
+                        "forecast": [
+                            {
+                                "timestamp": "2025-01-28T00:00:00Z",
+                                "predicted_value": 22350,
+                                "confidence_lower": 19800,
+                                "confidence_upper": 24900
+                            },
+                            {
+                                "timestamp": "2025-01-29T00:00:00Z",
+                                "predicted_value": 23120,
+                                "confidence_lower": 20450,
+                                "confidence_upper": 25790
+                            },
+                            {
+                                "timestamp": "2025-01-30T00:00:00Z",
+                                "predicted_value": 24680,
+                                "confidence_lower": 21900,
+                                "confidence_upper": 27460
+                            }
+                        ],
+                        "model": "Prophet",
+                        "confidence_level": 0.95,
+                        "horizon_days": 7
+                    }
+                }
+            },
+            'search-keywords': {
+                endpoint: '/v1/trends/search-keywords?start=2025-01-20T00:00:00Z&end=2025-01-27T00:00:00Z&top_k=10',
+                response: {
+                    "status": "success",
+                    "data": {
+                        "keywords": [
+                            {
+                                "rank": 1,
+                                "keyword": "Python",
+                                "search_count": 12450,
+                                "growth_rate": 15.3
+                            },
+                            {
+                                "rank": 2,
+                                "keyword": "FastAPI",
+                                "search_count": 9823,
+                                "growth_rate": 28.7
+                            },
+                            {
+                                "rank": 3,
+                                "keyword": "React",
+                                "search_count": 8912,
+                                "growth_rate": -5.2
+                            },
+                            {
+                                "rank": 4,
+                                "keyword": "Machine Learning",
+                                "search_count": 7654,
+                                "growth_rate": 42.1
+                            },
+                            {
+                                "rank": 5,
+                                "keyword": "Docker",
+                                "search_count": 6543,
+                                "growth_rate": 8.9
+                            }
+                        ],
+                        "total_searches": 125647,
+                        "period": "7d"
+                    }
+                }
+            }
+        };
+        
+        const example = examples[exampleType];
+        if (example) {
+            endpointInput.value = example.endpoint;
+            responseBodyDiv.textContent = JSON.stringify(example.response, null, 2);
+            
+            // 응답 메타 정보 업데이트
+            const metaDiv = document.getElementById('responseMeta');
+            metaDiv.innerHTML = `
+                <div class="response-success">
+                    <span>✓ 예시 데이터</span>
+                    <span>응답 시간: 0ms</span>
+                </div>
+            `;
+            
+            // 콘솔로 스크롤
+            document.querySelector('.console-container').scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'start' 
+            });
+        }
+    }
+
     document.getElementById('sendRequest').addEventListener('click', async function() {
         const method = document.getElementById('method').value;
         const endpoint = document.getElementById('endpoint').value;
