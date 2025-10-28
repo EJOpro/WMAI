@@ -6,13 +6,17 @@
 - 나중에 실제 DB로 교체
 """
 
-from fastapi import APIRouter, Query, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Query, HTTPException, Request
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 import random
+import time
 
 router = APIRouter(tags=["api"])
+
+# Ethics Analyzer 전역 변수 (main.py에서 초기화됨)
+ethics_analyzer = None
 
 # ============================================
 # 📊 데이터 모델 (Pydantic)
@@ -48,13 +52,13 @@ class ReportCategory(BaseModel):
     status: str
     avg_processing_time: str
 
-class HateScoreRequest(BaseModel):
-    """혐오지수 분석 요청"""
+class EthicsScoreRequest(BaseModel):
+    """비윤리/스팸지수 분석 요청"""
     text: str
 
-class HateScoreResponse(BaseModel):
-    """혐오지수 분석 응답"""
-    hate_score: float
+class EthicsScoreResponse(BaseModel):
+    """비윤리/스팸지수 분석 응답"""
+    ethics_score: float
     detected_expressions: List[dict]
     recommendations: List[dict]
 
@@ -200,13 +204,13 @@ async def get_reports():
     }
 
 # ============================================
-# ⚠️ 혐오지수 분석 API
+# ⚠️ 비윤리/스팸지수 분석 API
 # ============================================
 
-@router.post("/moderation/hate-score")
-async def analyze_hate_score(request: HateScoreRequest):
+@router.post("/moderation/ethics-score")
+async def analyze_ethics_score(request: EthicsScoreRequest):
     """
-    텍스트 혐오지수 분석
+    텍스트 비윤리/스팸지수 분석
     
     **실제로는:**
     - NLP 모델 사용
@@ -220,26 +224,26 @@ async def analyze_hate_score(request: HateScoreRequest):
         raise HTTPException(status_code=400, detail="분석할 텍스트를 입력하세요")
     
     # 간단한 키워드 기반 Mock 분석
-    hate_keywords = ["바보", "멍청", "쓰레기", "죽어", "꺼져"]
+    ethics_keywords = ["바보", "멍청", "쓰레기", "죽어", "꺼져"]
     detected = []
     
-    for keyword in hate_keywords:
+    for keyword in ethics_keywords:
         if keyword in text:
             detected.append({
                 "text": keyword,
-                "type": "욕설",
+                "type": "비윤리적 표현",
                 "severity": "high" if len(keyword) > 2 else "medium"
             })
     
-    hate_score = min(len(detected) * 25, 100)
+    ethics_score = min(len(detected) * 25, 100)
     
     recommendations = []
-    if hate_score >= 70:
+    if ethics_score >= 70:
         recommendations.append({
             "priority": "high",
-            "message": "심각한 혐오 표현이 감지되었습니다. 즉시 조치가 필요합니다."
+            "message": "심각한 비윤리적 표현이 감지되었습니다. 즉시 조치가 필요합니다."
         })
-    elif hate_score >= 40:
+    elif ethics_score >= 40:
         recommendations.append({
             "priority": "medium",
             "message": "부적절한 표현이 포함되어 있습니다. 검토가 필요합니다."
@@ -251,7 +255,7 @@ async def analyze_hate_score(request: HateScoreRequest):
         })
     
     return {
-        "hate_score": hate_score,
+        "ethics_score": ethics_score,
         "detected_expressions": detected,
         "recommendations": recommendations
     }
@@ -303,4 +307,207 @@ async def test_api():
 async def test_error():
     """에러 테스트"""
     raise HTTPException(status_code=500, detail="테스트용 에러입니다")
+
+# ============================================
+# 🛡️ Ethics 비윤리/스팸 분석 API (실제 구현)
+# ============================================
+
+class EthicsAnalyzeRequest(BaseModel):
+    """Ethics 분석 요청 모델"""
+    text: str = Field(..., description="분석할 텍스트", min_length=1, max_length=1000)
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "text": "너 정말 멍청하구나"
+            }
+        }
+
+class EthicsAnalyzeResponse(BaseModel):
+    """Ethics 분석 응답 모델"""
+    text: str
+    score: float = Field(..., description="비윤리 점수 (0-100)")
+    confidence: float = Field(..., description="비윤리 신뢰도 (0-100)")
+    spam: float = Field(..., description="스팸 지수 (0-100)")
+    spam_confidence: float = Field(..., description="스팸 신뢰도 (0-100)")
+    types: List[str] = Field(..., description="분석 유형 목록")
+
+
+def simplify_result(result: dict) -> dict:
+    """분석 결과를 간결한 형식으로 변환 (소수점 1자리)"""
+    return {
+        'text': result['text'],
+        'score': round(result['final_score'], 1),
+        'confidence': round(result['final_confidence'], 1),
+        'spam': round(result['spam_score'], 1),
+        'spam_confidence': round(result['spam_confidence'], 1),
+        'types': result['types']
+    }
+
+
+@router.post("/ethics/analyze", response_model=EthicsAnalyzeResponse, tags=["ethics"])
+async def ethics_analyze(request_data: EthicsAnalyzeRequest, request: Request):
+    """
+    텍스트 비윤리/스팸 분석 (하이브리드 시스템)
+    
+    - **text**: 분석할 텍스트 (최대 1000자)
+    
+    Returns:
+    - 비윤리 점수, 신뢰도, 스팸 지수, 유형 정보 등
+    """
+    global ethics_analyzer
+    
+    # 지연 로딩: 서버 시작 시 초기화 실패한 경우 재시도
+    if ethics_analyzer is None:
+        try:
+            print("[INFO] Ethics 분석기 초기화 중 (재시도)...")
+            from ethics.ethics_hybrid_predictor import HybridEthicsAnalyzer
+            ethics_analyzer = HybridEthicsAnalyzer()
+            print("[INFO] Ethics 분석기 초기화 완료")
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"분석기 초기화 실패: {str(e)}. models/ 디렉토리와 .env 파일을 확인하세요.")
+    
+    if ethics_analyzer is None:
+        raise HTTPException(status_code=503, detail="분석기가 초기화되지 않았습니다.")
+    
+    start_time = time.time()
+    
+    try:
+        result = ethics_analyzer.analyze(request_data.text)
+        simplified = simplify_result(result)
+        
+        # 응답 시간 계산
+        response_time = time.time() - start_time
+        
+        # 로그 저장
+        try:
+            from ethics.ethics_db_logger import db_logger
+            db_logger.log_analysis(
+                text=simplified['text'],
+                score=simplified['score'],
+                confidence=simplified['confidence'],
+                spam=simplified['spam'],
+                spam_confidence=simplified['spam_confidence'],
+                types=simplified['types'],
+                ip_address=request.client.host,
+                user_agent=request.headers.get('user-agent'),
+                response_time=response_time
+            )
+        except Exception as log_error:
+            print(f"[WARN] 로그 저장 실패: {log_error}")
+        
+        return simplified
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"분석 중 오류 발생: {str(e)}")
+
+
+@router.get("/ethics/logs", tags=["ethics"])
+async def get_ethics_logs(
+    limit: int = Query(100, description="최대 조회 개수"),
+    offset: int = Query(0, description="시작 위치"),
+    min_score: Optional[float] = Query(None, description="최소 점수 필터"),
+    max_score: Optional[float] = Query(None, description="최대 점수 필터"),
+    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)")
+):
+    """
+    Ethics 분석 로그 조회
+    
+    - **limit**: 최대 조회 개수 (기본값: 100)
+    - **offset**: 시작 위치 (기본값: 0)
+    - **min_score**: 최소 점수 필터
+    - **max_score**: 최대 점수 필터
+    - **start_date**: 시작 날짜 (YYYY-MM-DD)
+    - **end_date**: 종료 날짜 (YYYY-MM-DD)
+    """
+    try:
+        from ethics.ethics_db_logger import db_logger
+        logs = db_logger.get_logs(
+            limit=limit,
+            offset=offset,
+            min_score=min_score,
+            max_score=max_score,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return {
+            "logs": logs,
+            "count": len(logs),
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"로그 조회 중 오류: {str(e)}")
+
+
+@router.get("/ethics/logs/stats", tags=["ethics"])
+async def get_ethics_statistics(days: int = Query(7, description="조회할 일수")):
+    """
+    Ethics 통계 정보 조회
+    
+    - **days**: 조회할 일수 (기본값: 7일)
+    
+    Returns:
+    - 전체 건수, 평균 점수, 고위험 건수, 스팸 건수, 일별 통계
+    """
+    try:
+        from ethics.ethics_db_logger import db_logger
+        stats = db_logger.get_statistics(days=days)
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"통계 조회 중 오류: {str(e)}")
+
+
+@router.delete("/ethics/logs/{log_id}", tags=["ethics"])
+async def delete_ethics_log(log_id: int):
+    """
+    특정 Ethics 로그 삭제
+    
+    - **log_id**: 삭제할 로그의 ID
+    
+    Returns:
+    - 삭제 성공 메시지
+    """
+    try:
+        from ethics.ethics_db_logger import db_logger
+        success = db_logger.delete_log(log_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"로그 ID {log_id} 삭제 완료"
+            }
+        else:
+            raise HTTPException(status_code=404, detail="해당 로그를 찾을 수 없습니다")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"로그 삭제 중 오류: {str(e)}")
+
+
+@router.delete("/ethics/logs/batch/old", tags=["ethics"])
+async def delete_old_ethics_logs(days: int = Query(90, description="보관 기간 (일)")):
+    """
+    오래된 Ethics 로그 삭제
+    
+    - **days**: 보관 기간 (기본값: 90일, 0이면 모든 로그 삭제)
+    
+    Returns:
+    - 삭제된 로그 수
+    """
+    try:
+        from ethics.ethics_db_logger import db_logger
+        if days == 0:
+            # 모든 로그 삭제
+            deleted_count = db_logger.delete_all_logs()
+            return {
+                "deleted_count": deleted_count,
+                "message": f"모든 로그 {deleted_count}개 삭제 완료"
+            }
+        else:
+            # 지정된 기간 이전 로그 삭제
+            deleted_count = db_logger.delete_old_logs(days=days)
+            return {
+                "deleted_count": deleted_count,
+                "message": f"{days}일 이전 로그 {deleted_count}개 삭제 완료"
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"로그 삭제 중 오류: {str(e)}")
 

@@ -13,7 +13,7 @@ FastAPI + Jinja2 기반의 SSR 웹 애플리케이션으로, 커뮤니티 관리
 3. **방문객 이탈률 대시보드** - 이탈률 데이터 시각화
 4. **트렌드 대시보드** - 트렌드 및 키워드 분석
 5. **신고글 분류평가** - 카테고리별 신고 통계
-6. **혐오지수 평가** - 텍스트 혐오 표현 분석
+6. **비윤리/스팸지수 평가** - 텍스트 비윤리 표현 및 스팸 분석
 
 ## 기술 스택
 
@@ -76,7 +76,8 @@ app/
 │       ├── bounce.html
 │       ├── trends.html
 │       ├── reports.html
-│       └── hate.html
+│       ├── ethics_analyze.html
+│       └── ethics_dashboard.html
 └── static/
     ├── css/
     │   └── app.css         # 스타일시트
@@ -93,7 +94,7 @@ app/
 - `GET /api/metrics/bounce` - 이탈률 데이터
 - `GET /api/trends` - 트렌드 데이터
 - `GET /api/reports/moderation` - 신고 분류 데이터
-- `POST /api/moderation/hate-score` - 혐오지수 분석
+- `POST /api/moderation/ethics-score` - 비윤리/스팸지수 분석
 
 ### 프론트엔드 라우트
 
@@ -102,7 +103,8 @@ app/
 - `GET /bounce` - 이탈률 대시보드
 - `GET /trends` - 트렌드 대시보드
 - `GET /reports` - 신고글 분류
-- `GET /hate` - 혐오지수 평가
+- `GET /ethics_analyze` - 비윤리/스팸지수 평가 입력
+- `GET /ethics_dashboard` - 로그기록 대시보드
 - `GET /health` - 헬스체크
 
 ## 개발 가이드
