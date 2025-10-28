@@ -15,8 +15,8 @@ if sys.platform == 'win32':
 class EthicsPredictor:
     """비윤리 판단 예측기"""
     
-    def __init__(self, model_path='models/binary_classifier.pth', 
-                 config_path='models/config.json'):
+    def __init__(self, model_path='ethics/models/binary_classifier.pth', 
+                 config_path='ethics/models/config.json'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # 설정 로드

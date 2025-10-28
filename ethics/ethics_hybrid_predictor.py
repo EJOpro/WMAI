@@ -124,8 +124,8 @@ class HybridEthicsAnalyzer:
     }
     
     def __init__(self, 
-                 model_path='models/binary_classifier.pth',
-                 config_path='models/config.json',
+                 model_path='ethics/models/binary_classifier.pth',
+                 config_path='ethics/models/config.json',
                  api_key: Optional[str] = None,
                  model_name: Optional[str] = None):
         """
