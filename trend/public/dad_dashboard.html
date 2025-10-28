@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>육식남(dad.dothome.co.kr) 실시간 대시보드 - 인기검색어 연동</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        
+        .metric-card {
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .metric-card .card-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .card {
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+        
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .ranking-item {
+            padding: 12px 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+        }
+        
+        .ranking-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+        
+        .site-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        
+        .update-time {
+            font-size: 0.85em;
+            color: #6c757d;
+            text-align: center;
+            margin-top: 10px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state .icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+    </style>
+</head>
+<body>
+    <!-- 헤더 -->
+    <header class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-chart-line me-2"></i>
+                육식남 실시간 대시보드
+            </span>
+            <span class="navbar-text">
+                <a href="http://dad.dothome.co.kr" target="_blank" class="site-badge text-decoration-none">
+                    <i class="fas fa-external-link-alt me-1"></i>dad.dothome.co.kr
+                </a>
+            </span>
+        </div>
+    </header>
+
+    <div class="container-fluid mt-4">
+        <!-- 페이지 제목 -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="mb-0">
+                <i class="fas fa-tachometer-alt text-primary me-2"></i>
+                실시간 방문자 분석
+            </h2>
+            <button class="btn btn-primary" onclick="refreshDashboard()">
+                <i class="fas fa-sync-alt me-2"></i>새로고침
+            </button>
+        </div>
+
+        <!-- 주요 지표 카드 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center metric-card">
+                    <div class="card-body">
+                        <i class="fas fa-eye fa-2x text-primary mb-2"></i>
+                        <h6 class="card-subtitle mb-2 text-muted">총 이벤트</h6>
+                        <h2 class="card-title text-primary" id="totalEvents">-</h2>
+                        <p class="card-text">
+                            <small class="text-muted" id="statsUpdateTime">로딩 중...</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center metric-card">
+                    <div class="card-body">
+                        <i class="fas fa-file-alt fa-2x text-success mb-2"></i>
+                        <h6 class="card-subtitle mb-2 text-muted">페이지뷰</h6>
+                        <h2 class="card-title text-success" id="pageviews">-</h2>
+                        <p class="card-text">
+                            <small class="text-muted">방문 페이지 수</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center metric-card">
+                    <div class="card-body">
+                        <i class="fas fa-search fa-2x text-info mb-2"></i>
+                        <h6 class="card-subtitle mb-2 text-muted">검색</h6>
+                        <h2 class="card-title text-info" id="searches">-</h2>
+                        <p class="card-text">
+                            <small class="text-muted">검색 횟수</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center metric-card">
+                    <div class="card-body">
+                        <i class="fas fa-mouse-pointer fa-2x text-warning mb-2"></i>
+                        <h6 class="card-subtitle mb-2 text-muted">클릭</h6>
+                        <h2 class="card-title text-warning" id="clicks">-</h2>
+                        <p class="card-text">
+                            <small class="text-muted">클릭 횟수</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 탭 네비게이션 -->
+        <ul class="nav nav-tabs mb-3" id="mainTabs">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#realtime">
+                    <i class="fas fa-bolt me-1"></i>실시간
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#today">
+                    <i class="fas fa-calendar-day me-1"></i>오늘
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#search">
+                    <i class="fas fa-trophy me-1"></i>인기 검색어
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#charts">
+                    <i class="fas fa-chart-area me-1"></i>트렌드
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#keywords">
+                    <i class="fas fa-tags me-1"></i>키워드 분석
+                </a>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- 실시간 탭 -->
+            <div class="tab-pane fade show active" id="realtime">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-bolt me-2 text-warning"></i>최근 10분 활동
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <tbody>
+                                            <tr>
+                                                <td><i class="fas fa-circle text-primary me-2" style="font-size: 0.6rem;"></i>총 이벤트</td>
+                                                <td class="text-end"><strong id="recentEvents">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fas fa-circle text-success me-2" style="font-size: 0.6rem;"></i>페이지뷰</td>
+                                                <td class="text-end"><strong id="recentPageviews">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fas fa-circle text-info me-2" style="font-size: 0.6rem;"></i>검색</td>
+                                                <td class="text-end"><strong id="recentSearches">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fas fa-circle text-warning me-2" style="font-size: 0.6rem;"></i>클릭</td>
+                                                <td class="text-end"><strong id="recentClicks">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fas fa-circle text-danger me-2" style="font-size: 0.6rem;"></i>게시글 작성</td>
+                                                <td class="text-end"><strong id="recentPosts">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fas fa-circle text-secondary me-2" style="font-size: 0.6rem;"></i>댓글 작성</td>
+                                                <td class="text-end"><strong id="recentComments">-</strong></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="update-time" id="recentUpdateTime">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-scroll me-2 text-secondary"></i>스크롤 깊이 분포
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <tbody>
+                                            <tr>
+                                                <td>총 스크롤</td>
+                                                <td class="text-end"><strong id="scrolls">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><span class="badge bg-success">25%</span> 깊이</td>
+                                                <td class="text-end"><strong id="scroll25">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><span class="badge bg-info">50%</span> 깊이</td>
+                                                <td class="text-end"><strong id="scroll50">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><span class="badge bg-warning">75%</span> 깊이</td>
+                                                <td class="text-end"><strong id="scroll75">-</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td><span class="badge bg-danger">100%</span> 완독</td>
+                                                <td class="text-end"><strong id="scroll100">-</strong></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 오늘 탭 -->
+            <div class="tab-pane fade" id="today">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-calendar-day me-2 text-primary"></i>오늘의 통계
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row text-center">
+                                    <div class="col-md-3">
+                                        <div class="p-3">
+                                            <i class="fas fa-users fa-3x text-primary mb-3"></i>
+                                            <h3 id="todayEvents">-</h3>
+                                            <p class="text-muted">총 이벤트</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-3">
+                                            <i class="fas fa-eye fa-3x text-success mb-3"></i>
+                                            <h3 id="todayPageviews">-</h3>
+                                            <p class="text-muted">페이지뷰</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-3">
+                                            <i class="fas fa-search fa-3x text-info mb-3"></i>
+                                            <h3 id="todaySearches">-</h3>
+                                            <p class="text-muted">검색</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-3">
+                                            <i class="fas fa-mouse-pointer fa-3x text-warning mb-3"></i>
+                                            <h3 id="todayClicks">-</h3>
+                                            <p class="text-muted">클릭</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row text-center mt-3">
+                                    <div class="col-md-4">
+                                        <div class="p-3">
+                                            <i class="fas fa-edit fa-2x text-danger mb-2"></i>
+                                            <h4 id="todayPosts">-</h4>
+                                            <p class="text-muted">게시글 작성</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="p-3">
+                                            <i class="fas fa-comment fa-2x text-secondary mb-2"></i>
+                                            <h4 id="todayComments">-</h4>
+                                            <p class="text-muted">댓글 작성</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="p-3">
+                                            <i class="fas fa-scroll fa-2x text-info mb-2"></i>
+                                            <h4 id="todayScrolls">-</h4>
+                                            <p class="text-muted">스크롤</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="update-time" id="todayUpdateTime">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 인기 검색어 탭 -->
+            <div class="tab-pane fade" id="search">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-trophy me-2 text-warning"></i>실시간 인기 검색어 (최근 24시간)
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="searchRankingList">
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">로딩 중...</span>
+                                </div>
+                                <p class="mt-3 text-muted">데이터 로딩 중...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 트렌드 차트 탭 -->
+            <div class="tab-pane fade" id="charts">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-chart-line me-2 text-success"></i>시간대별 페이지뷰 트렌드 (최근 24시간)
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="pageviewChart" height="80"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-chart-pie me-2 text-info"></i>이벤트 타입별 분포
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="eventTypeChart" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-mobile-alt me-2 text-secondary"></i>디바이스별 분포
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="text-center py-5">
+                                    <p class="text-muted">준비 중...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 키워드 분석 탭 -->
+            <div class="tab-pane fade" id="keywords">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-tags me-2 text-primary"></i>dad.dothome.co.kr 키워드 분석
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <!-- 필터 섹션 -->
+                                <div class="row mb-4">
+                                    <div class="col-md-3">
+                                        <label class="form-label">시작 날짜</label>
+                                        <input type="datetime-local" class="form-control" id="keywordStartDate">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">종료 날짜</label>
+                                        <input type="datetime-local" class="form-control" id="keywordEndDate">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">분석할 키워드 (쉼표로 구분)</label>
+                                        <input type="text" class="form-control" id="keywordInput" placeholder="예: 육아,아빠,육식남,구독">
+                                    </div>
+                                    <div class="col-md-2 d-flex align-items-end">
+                                        <button class="btn btn-primary w-100" onclick="analyzeKeywords()">
+                                            <i class="fas fa-search me-1"></i>분석
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- 키워드 분석 결과 -->
+                                <div id="keywordAnalysisResults">
+                                    <div class="text-center py-5">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">로딩 중...</span>
+                                        </div>
+                                        <p class="mt-3 text-muted">키워드 분석을 시작하려면 위의 "분석" 버튼을 클릭하세요</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 워드클라우드 섹션 -->
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-cloud me-2 text-info"></i>워드클라우드
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="wordcloudContainer" style="height: 300px; text-align: center;">
+                                    <p class="text-muted">키워드 분석 후 워드클라우드가 표시됩니다</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-chart-line me-2 text-success"></i>키워드 타임라인
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="keywordTimelineChart" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 인기검색어 위젯 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-fire text-danger me-2"></i>
+                            실시간 인기검색어
+                        </h5>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadPopularKeywords()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="popularKeywordsList" class="list-group list-group-flush">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">로딩 중...</span>
+                                </div>
+                                <p class="mt-2 text-muted">인기검색어를 불러오는 중...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-chart-line text-success me-2"></i>
+                            검색어 통계
+                        </h5>
+                        <button class="btn btn-sm btn-outline-success" onclick="loadKeywordsStats()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="keywordsStatsContainer">
+                            <div class="text-center">
+                                <div class="spinner-border text-success" role="status">
+                                    <span class="visually-hidden">로딩 중...</span>
+                                </div>
+                                <p class="mt-2 text-muted">통계를 불러오는 중...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 자동 새로고침 안내 -->
+        <div class="alert alert-info text-center mt-4">
+            <i class="fas fa-info-circle me-2"></i>
+            이 대시보드는 <strong>30초마다 자동으로 새로고침</strong>됩니다.
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const API_KEY = 'dev_api_key_12345';
+        
+        let pageviewChart = null;
+        let eventTypeChart = null;
+        let keywordTimelineChart = null;
+
+        // 페이지 로드 시 대시보드 초기화
+        window.addEventListener('load', function() {
+            refreshDashboard();
+            initializeKeywordAnalysis();
+            // 30초마다 자동 새로고침
+            setInterval(refreshDashboard, 30000);
+        });
+
+        // 대시보드 전체 새로고침
+        async function refreshDashboard() {
+            console.log('🔄 대시보드 새로고침...');
+            await Promise.all([
+                loadAllStats(),
+                loadSearchRanking(),
+                loadPageviewTrend(),
+                loadEventTypeDistribution(),
+                loadPopularKeywords(),
+                loadKeywordsStats()
+            ]);
+        }
+
+        // 통합 통계 로드
+        async function loadAllStats() {
+            try {
+                const response = await fetch(`${API_BASE}/v1/stats/summary`);
+                
+                if (!response.ok) {
+                    throw new Error('API 호출 실패');
+                }
+                
+                const data = await response.json();
+                
+                // 전체 통계
+                document.getElementById('totalEvents').textContent = data.total.events.toLocaleString();
+                document.getElementById('pageviews').textContent = data.total.pageview.toLocaleString();
+                document.getElementById('searches').textContent = data.total.search.toLocaleString();
+                document.getElementById('clicks').textContent = data.total.click.toLocaleString();
+                document.getElementById('scrolls').textContent = data.total.scroll.toLocaleString();
+                document.getElementById('statsUpdateTime').textContent = '업데이트: ' + new Date().toLocaleTimeString('ko-KR');
+                
+                // 최근 10분
+                document.getElementById('recentEvents').textContent = data.recent_10min.events.toLocaleString();
+                document.getElementById('recentPageviews').textContent = data.recent_10min.pageview.toLocaleString();
+                document.getElementById('recentSearches').textContent = data.recent_10min.search.toLocaleString();
+                document.getElementById('recentClicks').textContent = data.recent_10min.click.toLocaleString();
+                document.getElementById('recentPosts').textContent = (data.recent_10min.post_write || 0).toLocaleString();
+                document.getElementById('recentComments').textContent = (data.recent_10min.comment_write || 0).toLocaleString();
+                document.getElementById('recentUpdateTime').textContent = '업데이트: ' + new Date().toLocaleTimeString('ko-KR');
+                
+                // 오늘
+                document.getElementById('todayEvents').textContent = data.today.events.toLocaleString();
+                document.getElementById('todayPageviews').textContent = data.today.pageview.toLocaleString();
+                document.getElementById('todaySearches').textContent = data.today.search.toLocaleString();
+                document.getElementById('todayClicks').textContent = data.today.click.toLocaleString();
+                document.getElementById('todayPosts').textContent = (data.today.post_write || 0).toLocaleString();
+                document.getElementById('todayComments').textContent = (data.today.comment_write || 0).toLocaleString();
+                document.getElementById('todayScrolls').textContent = data.today.scroll.toLocaleString();
+                document.getElementById('todayUpdateTime').textContent = '업데이트: ' + new Date().toLocaleTimeString('ko-KR');
+                
+                // 스크롤 깊이별 (임시)
+                const scrollTotal = data.total.scroll;
+                document.getElementById('scroll25').textContent = Math.floor(scrollTotal * 0.4).toLocaleString();
+                document.getElementById('scroll50').textContent = Math.floor(scrollTotal * 0.3).toLocaleString();
+                document.getElementById('scroll75').textContent = Math.floor(scrollTotal * 0.2).toLocaleString();
+                document.getElementById('scroll100').textContent = Math.floor(scrollTotal * 0.1).toLocaleString();
+                
+                console.log('✅ 통계 로드 완료');
+                
+            } catch (error) {
+                console.error('❌ 통계 로드 실패:', error);
+                document.getElementById('totalEvents').textContent = '에러';
+                document.getElementById('pageviews').textContent = '에러';
+                document.getElementById('searches').textContent = '에러';
+                document.getElementById('clicks').textContent = '에러';
+            }
+        }
+
+        // 인기 검색어 랭킹
+        async function loadSearchRanking() {
+            const container = document.getElementById('searchRankingList');
+            
+            try {
+                const end = new Date();
+                const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+                
+                const response = await fetch(
+                    `${API_BASE}/v1/trends/search-keywords?start=${start.toISOString()}&end=${end.toISOString()}&top_k=10`,
+                    { headers: { 'x-api-key': API_KEY } }
+                );
+                
+                const data = await response.json();
+                
+                if (!data.rankings || data.rankings.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="icon">🔍</div>
+                            <p>아직 검색 데이터가 없습니다</p>
+                            <p style="font-size: 0.9em;">dad.dothome.co.kr에서 검색을 해보세요!</p>
+                            <button class="btn btn-sm btn-outline-primary mt-3" onclick="showSearchTip()">
+                                <i class="fas fa-question-circle me-1"></i>검색 테스트 방법 보기
+                            </button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '<div class="list-group">';
+                data.rankings.forEach(item => {
+                    const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : `${item.rank}위`;
+                    html += `
+                        <div class="ranking-item">
+                            <span style="font-size: 1.5em; width: 50px; text-align: center;">${medal}</span>
+                            <span style="flex: 1; font-size: 1.1em; font-weight: 500; margin: 0 15px;">${item.keyword}</span>
+                            <span class="badge bg-primary" style="font-size: 1em; padding: 8px 15px;">${item.count.toLocaleString()}회</span>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                html += `<p class="text-center mt-3 text-muted">총 검색 횟수: <strong>${data.total_searches.toLocaleString()}회</strong></p>`;
+                
+                container.innerHTML = html;
+                console.log('✅ 검색 랭킹 로드 완료');
+                
+            } catch (error) {
+                console.error('❌ 검색 랭킹 로드 실패:', error);
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">❌</div>
+                        <p>데이터를 불러올 수 없습니다</p>
+                        <p style="font-size: 0.9em;">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 검색 테스트 팁 표시
+        function showSearchTip() {
+            alert('검색 데이터 수집 방법:\n\n1. dad.dothome.co.kr에서 F12 Console 열기\n2. 다음 코드 실행:\n\nwindow.TrendStream.search(\'육아정보\');\nwindow.TrendStream.search(\'아빠클럽\');\nwindow.TrendStream.search(\'구독서비스\');\n\n3. 이 대시보드에서 "새로고침" 버튼 클릭!');
+        }
+
+        // 페이지뷰 트렌드 차트
+        async function loadPageviewTrend() {
+            const canvas = document.getElementById('pageviewChart');
+            const ctx = canvas.getContext('2d');
+            
+            try {
+                // 실제 데이터 (임시로 랜덤 생성)
+                const labels = [];
+                const data = [];
+                
+                for (let i = 23; i >= 0; i--) {
+                    const time = new Date(Date.now() - i * 60 * 60 * 1000);
+                    labels.push(time);
+                    data.push(Math.floor(Math.random() * 20) + 5);
+                }
+                
+                if (pageviewChart) {
+                    pageviewChart.destroy();
+                }
+                
+                pageviewChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: '페이지뷰',
+                            data: data,
+                            borderColor: '#0d6efd',
+                            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                            tension: 0.4,
+                            fill: true,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: '시간'
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: '페이지뷰 수'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        }
+                    }
+                });
+                
+                console.log('✅ 페이지뷰 트렌드 로드 완료');
+                
+            } catch (error) {
+                console.error('❌ 페이지뷰 트렌드 로드 실패:', error);
+            }
+        }
+
+        // 이벤트 타입별 분포 차트
+        async function loadEventTypeDistribution() {
+            const canvas = document.getElementById('eventTypeChart');
+            const ctx = canvas.getContext('2d');
+            
+            try {
+                const response = await fetch(`${API_BASE}/v1/stats/summary`);
+                const data = await response.json();
+                
+                if (eventTypeChart) {
+                    eventTypeChart.destroy();
+                }
+                
+                const total = data.total;
+                
+                eventTypeChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['페이지뷰', '클릭', '스크롤', '검색', '게시글', '댓글'],
+                        datasets: [{
+                            data: [
+                                total.pageview,
+                                total.click,
+                                total.scroll,
+                                total.search,
+                                total.post_write || 0,
+                                total.comment_write || 0
+                            ],
+                            backgroundColor: [
+                                '#0d6efd',
+                                '#ffc107',
+                                '#6c757d',
+                                '#17a2b8',
+                                '#dc3545',
+                                '#6c757d'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+                
+                console.log('✅ 이벤트 타입 차트 로드 완료');
+                
+            } catch (error) {
+                console.error('❌ 이벤트 타입 차트 로드 실패:', error);
+            }
+        }
+
+
+        // 키워드 분석 초기화
+        function initializeKeywordAnalysis() {
+            // 날짜 초기화 (최근 7일)
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            
+            document.getElementById('keywordStartDate').value = weekAgo.toISOString().slice(0, 16);
+            document.getElementById('keywordEndDate').value = now.toISOString().slice(0, 16);
+            
+            // 기본 키워드 설정
+            document.getElementById('keywordInput').value = '육아,아빠,육식남,구독,아이,육아정보';
+        }
+
+        // 키워드 분석 실행
+        async function analyzeKeywords() {
+            const startDate = document.getElementById('keywordStartDate').value;
+            const endDate = document.getElementById('keywordEndDate').value;
+            const keywords = document.getElementById('keywordInput').value;
+
+            if (!startDate || !endDate) {
+                alert('시작 날짜와 종료 날짜를 선택해주세요.');
+                return;
+            }
+
+            if (!keywords.trim()) {
+                alert('분석할 키워드를 입력해주세요.');
+                return;
+            }
+
+            try {
+                // 로딩 표시
+                document.getElementById('keywordAnalysisResults').innerHTML = `
+                    <div class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">분석 중...</span>
+                        </div>
+                        <p class="mt-2 text-muted">키워드 분석 중...</p>
+                    </div>
+                `;
+
+                // 워드클라우드 로드
+                await loadWordcloud(startDate, endDate);
+                
+                // 키워드 타임라인 로드
+                await loadKeywordTimeline(startDate, endDate, keywords);
+                
+                // 분석 결과 표시
+                showKeywordAnalysisResults();
+
+            } catch (error) {
+                console.error('키워드 분석 실패:', error);
+                document.getElementById('keywordAnalysisResults').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        키워드 분석 중 오류가 발생했습니다: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // 워드클라우드 로드
+        async function loadWordcloud(startDate, endDate) {
+            try {
+                const params = new URLSearchParams({
+                    start: new Date(startDate).toISOString(),
+                    end: new Date(endDate).toISOString(),
+                    top_k: 30
+                });
+
+                const response = await fetch(`${API_BASE}/v1/community/wordcloud?${params}`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                
+                const data = await response.json();
+
+                if (data.words && data.words.length > 0) {
+                    renderWordcloud(data.words);
+                } else {
+                    document.getElementById('wordcloudContainer').innerHTML = '<p class="text-muted">표시할 키워드가 없습니다.</p>';
+                }
+            } catch (error) {
+                console.error('워드클라우드 로드 실패:', error);
+                document.getElementById('wordcloudContainer').innerHTML = '<p class="text-danger">워드클라우드 로드 실패</p>';
+            }
+        }
+
+        // 워드클라우드 렌더링
+        function renderWordcloud(words) {
+            const container = document.getElementById('wordcloudContainer');
+            container.innerHTML = '';
+
+            if (words.length === 0) {
+                container.innerHTML = '<p class="text-muted">표시할 키워드가 없습니다.</p>';
+                return;
+            }
+
+            // 간단한 워드클라우드 구현
+            words.slice(0, 20).forEach((word, index) => {
+                const span = document.createElement('span');
+                span.textContent = word.word;
+                span.style.display = 'inline-block';
+                span.style.margin = '4px';
+                span.style.padding = '6px 12px';
+                span.style.backgroundColor = getRandomColor();
+                span.style.color = 'white';
+                span.style.borderRadius = '15px';
+                span.style.fontSize = Math.max(12, Math.min(24, word.frequency * 2)) + 'px';
+                span.style.fontWeight = 'bold';
+                span.title = `${word.word}: ${word.frequency}회`;
+                container.appendChild(span);
+            });
+        }
+
+        // 랜덤 색상 생성
+        function getRandomColor() {
+            const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe', '#43e97b', '#38f9d7'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        // 키워드 타임라인 로드
+        async function loadKeywordTimeline(startDate, endDate, keywords) {
+            try {
+                const params = new URLSearchParams({
+                    start: new Date(startDate).toISOString(),
+                    end: new Date(endDate).toISOString(),
+                    keywords: keywords,
+                    granularity: '1d'
+                });
+
+                const response = await fetch(`${API_BASE}/v1/community/timeline?${params}`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                
+                const data = await response.json();
+
+                if (data.series && data.series.length > 0) {
+                    renderKeywordTimeline(data.series);
+                } else {
+                    document.getElementById('keywordTimelineChart').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('키워드 타임라인 로드 실패:', error);
+            }
+        }
+
+        // 키워드 타임라인 렌더링
+        function renderKeywordTimeline(series) {
+            const ctx = document.getElementById('keywordTimelineChart').getContext('2d');
+            document.getElementById('keywordTimelineChart').style.display = 'block';
+
+            if (keywordTimelineChart) {
+                keywordTimelineChart.destroy();
+            }
+
+            const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe'];
+
+            const datasets = series.map((s, index) => ({
+                label: s.keyword,
+                data: s.points.map(point => ({
+                    x: point.ts,
+                    y: point.count
+                })),
+                borderColor: colors[index % colors.length],
+                backgroundColor: colors[index % colors.length] + '20',
+                fill: false,
+                tension: 0.1
+            }));
+
+            keywordTimelineChart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // 키워드 분석 결과 표시
+        function showKeywordAnalysisResults() {
+            document.getElementById('keywordAnalysisResults').innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    키워드 분석이 완료되었습니다! 아래 차트에서 결과를 확인하세요.
+                </div>
+            `;
+        }
+
+        // 인기검색어 로드
+        async function loadPopularKeywords() {
+            const container = document.getElementById('popularKeywordsList');
+            
+            try {
+                const response = await fetch(`${API_BASE}/popular/keywords/trending?limit=10&hours=24`);
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error || 'API 오류');
+                }
+                
+                const keywords = data.data || [];
+                
+                if (keywords.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center text-muted">
+                            <i class="fas fa-search fa-2x mb-2"></i>
+                            <p>아직 인기검색어가 없습니다</p>
+                            <small>dad.dothome.co.kr에서 검색을 해보세요!</small>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '';
+                keywords.forEach((item, index) => {
+                    const rank = index + 1;
+                    const word = item.word || '';
+                    const date = item.date || '';
+                    const ip = item.ip || '';
+                    
+                    html += `
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-${rank <= 3 ? 'danger' : rank <= 6 ? 'warning' : 'primary'} me-2">
+                                    ${rank}
+                                </span>
+                                <div>
+                                    <strong>${word}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        <i class="fas fa-calendar-alt me-1"></i>${date}
+                                        <i class="fas fa-globe ms-2 me-1"></i>${ip}
+                                    </small>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary" onclick="searchKeyword('${word}')">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+                console.log('✅ 인기검색어 로드 완료');
+                
+            } catch (error) {
+                console.error('❌ 인기검색어 로드 실패:', error);
+                container.innerHTML = `
+                    <div class="text-center text-danger">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                        <p>인기검색어를 불러올 수 없습니다</p>
+                        <small>${error.message}</small>
+                        <br>
+                        <button class="btn btn-sm btn-outline-danger mt-2" onclick="loadPopularKeywords()">
+                            <i class="fas fa-retry"></i> 다시 시도
+                        </button>
+                    </div>
+                `;
+            }
+        }
+        
+        // 검색어 통계 로드
+        async function loadKeywordsStats() {
+            const container = document.getElementById('keywordsStatsContainer');
+            
+            try {
+                const response = await fetch(`${API_BASE}/popular/keywords/stats`);
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error || 'API 오류');
+                }
+                
+                const stats = data.stats || {};
+                
+                container.innerHTML = `
+                    <div class="row text-center">
+                        <div class="col-6 mb-3">
+                            <div class="border rounded p-3">
+                                <i class="fas fa-fire fa-2x text-danger mb-2"></i>
+                                <h4 class="text-danger">${(stats.total_keywords || 0).toLocaleString()}</h4>
+                                <small class="text-muted">전체 검색어</small>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="border rounded p-3">
+                                <i class="fas fa-calendar-day fa-2x text-success mb-2"></i>
+                                <h4 class="text-success">${(stats.today_keywords || 0).toLocaleString()}</h4>
+                                <small class="text-muted">오늘 검색어</small>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="border rounded p-3">
+                                <i class="fas fa-calendar-week fa-2x text-info mb-2"></i>
+                                <h4 class="text-info">${(stats.week_keywords || 0).toLocaleString()}</h4>
+                                <small class="text-muted">최근 7일</small>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="border rounded p-3">
+                                <i class="fas fa-calendar-alt fa-2x text-warning mb-2"></i>
+                                <h4 class="text-warning">${(stats.month_keywords || 0).toLocaleString()}</h4>
+                                <small class="text-muted">최근 30일</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-center">
+                        <small class="text-muted">
+                            <i class="fas fa-clock me-1"></i>
+                            마지막 업데이트: ${new Date().toLocaleString()}
+                        </small>
+                    </div>
+                `;
+                
+                console.log('✅ 검색어 통계 로드 완료');
+                
+            } catch (error) {
+                console.error('❌ 검색어 통계 로드 실패:', error);
+                container.innerHTML = `
+                    <div class="text-center text-danger">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                        <p>통계를 불러올 수 없습니다</p>
+                        <small>${error.message}</small>
+                        <br>
+                        <button class="btn btn-sm btn-outline-danger mt-2" onclick="loadKeywordsStats()">
+                            <i class="fas fa-retry"></i> 다시 시도
+                        </button>
+                    </div>
+                `;
+            }
+        }
+        
+        // 검색어 검색 함수
+        function searchKeyword(keyword) {
+            // dad.dothome.co.kr에서 검색어로 검색
+            const searchUrl = `https://dad.dothome.co.kr/bbs/search.php?sfl=wr_subject&stx=${encodeURIComponent(keyword)}`;
+            window.open(searchUrl, '_blank');
+        }
+
+        console.log('📊 dad.dothome.co.kr 대시보드 로드 완료!');
+        console.log('🔄 30초마다 자동 새로고침됩니다.');
+        console.log('🔍 키워드 분석 기능이 추가되었습니다!');
+        console.log('🔥 인기검색어 연동 기능이 추가되었습니다!');
+    </script>
+</body>
+</html>
