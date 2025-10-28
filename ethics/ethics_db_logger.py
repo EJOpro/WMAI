@@ -84,6 +84,7 @@ class DatabaseLogger:
                 score DOUBLE NOT NULL,
                 confidence DOUBLE NOT NULL,
                 spam DOUBLE NOT NULL,
+                spam_confidence DOUBLE,
                 types TEXT,
                 ip_address VARCHAR(50),
                 user_agent TEXT,
@@ -102,6 +103,13 @@ class DatabaseLogger:
             # types 컬럼이 이미 있으면 무시
             pass
         
+        # 기존 테이블에 spam_confidence 컬럼 추가 (마이그레이션)
+        try:
+            cursor.execute("ALTER TABLE analysis_logs ADD COLUMN spam_confidence DOUBLE")
+        except pymysql.err.OperationalError:
+            # spam_confidence 컬럼이 이미 있으면 무시
+            pass
+        
         conn.commit()
         conn.close()
         
@@ -114,6 +122,7 @@ class DatabaseLogger:
         confidence: float,
         spam: float,
         types: List[str],
+        spam_confidence: float = None,
         ip_address: str = None,
         user_agent: str = None,
         response_time: float = None
@@ -124,9 +133,10 @@ class DatabaseLogger:
         Args:
             text: 분석한 텍스트
             score: 비윤리 점수
-            confidence: 신뢰도
+            confidence: 비윤리 신뢰도
             spam: 스팸 지수
             types: 유형 리스트
+            spam_confidence: 스팸 신뢰도
             ip_address: 클라이언트 IP
             user_agent: User Agent
             response_time: 응답 시간(초)
@@ -141,9 +151,9 @@ class DatabaseLogger:
         
         cursor.execute("""
             INSERT INTO analysis_logs 
-            (text, score, confidence, spam, types, ip_address, user_agent, response_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (text, score, confidence, spam, types_json, ip_address, user_agent, response_time))
+            (text, score, confidence, spam, spam_confidence, types, ip_address, user_agent, response_time)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (text, score, confidence, spam, spam_confidence, types_json, ip_address, user_agent, response_time))
         
         log_id = cursor.lastrowid
         conn.commit()

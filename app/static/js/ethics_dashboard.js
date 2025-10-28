@@ -44,7 +44,6 @@
     closeDeleteOldModal: document.getElementById('closeDeleteOldModal'),
     deleteDays: document.getElementById('deleteDays'),
     previewCount: document.getElementById('previewCount'),
-    previewDelete: document.getElementById('previewDelete'),
     confirmDeleteOld: document.getElementById('confirmDeleteOld'),
     cancelDeleteOld: document.getElementById('cancelDeleteOld'),
     totalCount: document.getElementById('totalCount'),
@@ -160,7 +159,8 @@ const api = {
 const dataLoader = {
     async loadStats() {
         try {
-            const stats = await api.getStats(7);
+            const days = parseInt(elements.dateFilter.value) || 365; // 전체일 때는 365일
+            const stats = await api.getStats(days);
             
             elements.totalCount.textContent = stats.total_count.toLocaleString();
             elements.highRiskCount.textContent = stats.high_risk_count.toLocaleString();
@@ -223,22 +223,30 @@ const dataLoader = {
         allLogs.forEach(log => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${log.id}</td>
-                <td>${utils.formatDate(log.created_at)}</td>
+                <td class="id-column">${log.id}</td>
+                <td class="date-column">${utils.formatDate(log.created_at)}</td>
                 <td class="text-preview" title="${log.text}">${utils.truncateText(log.text)}</td>
                 <td class="${utils.getScoreClass(log.score)}">${utils.formatScore(log.score)} <br><small>(${utils.formatScore(log.confidence)})</small></td>
-                <td class="${utils.getSpamClass(log.spam)}">${utils.formatScore(log.spam)} <br><small>(${utils.formatScore(log.confidence)})</small></td>
-                <td>${utils.createTypeTags(log.types)}</td>
-                <td>${log.ip_address || '-'}</td>
-                <td>${log.response_time ? log.response_time.toFixed(3) + 's' : '-'}</td>
-                <td>
-                    <button class="btn-delete" onclick="event.stopPropagation(); deleteManager.showDeleteModal(${log.id}, '${log.text.replace(/'/g, "\\'")}', ${log.score})">
+                <td class="${utils.getSpamClass(log.spam)}">${utils.formatScore(log.spam)} <br><small>(${utils.formatScore(log.spam_confidence || log.confidence)})</small></td>
+                <td class="type-tags">${utils.createTypeTags(log.types)}</td>
+                <td class="ip-column">${log.ip_address || '-'}</td>
+                <td class="response-time-column">${log.response_time ? log.response_time.toFixed(3) + 's' : '-'}</td>
+                <td class="delete-column">
+                    <button class="btn-delete" data-log-id="${log.id}" data-log-text="${log.text.replace(/"/g, '&quot;')}" data-log-score="${log.score}">
                         <i class="fas fa-trash-alt"></i>
                         <span>삭제</span>
                     </button>
                 </td>
             `;
             
+            // 삭제 버튼 이벤트
+            const deleteBtn = row.querySelector('.btn-delete');
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteManager.showDeleteModal(log.id, log.text, log.score);
+            });
+            
+            // 행 클릭 이벤트 (상세 보기)
             row.addEventListener('click', () => this.showLogDetail(log));
             tbody.appendChild(row);
         });
@@ -280,7 +288,7 @@ const dataLoader = {
             </div>
             <div class="detail-row">
                 <div class="detail-label">스팸지수 (신뢰도):</div>
-                <div class="detail-value">${utils.formatScore(log.spam)} <small>(${utils.formatScore(log.confidence)})</small></div>
+                <div class="detail-value">${utils.formatScore(log.spam)} <small>(${utils.formatScore(log.spam_confidence || log.confidence)})</small></div>
             </div>
             <div class="detail-row">
                 <div class="detail-label">유형:</div>
@@ -314,15 +322,9 @@ const filterManager = {
         currentFilters = {};
         currentPage = 0;
         
-        const scoreFilter = elements.scoreFilter.value;
-        if (scoreFilter) {
-            const [min, max] = scoreFilter.split('-').map(Number);
-            if (min !== undefined) currentFilters.min_score = min;
-            if (max !== undefined) currentFilters.max_score = max;
-        }
-        
+        // 기간 필터 - 전체가 아닐 때만 적용
         const days = parseInt(elements.dateFilter.value);
-        if (days) {
+        if (days && days > 0) {
             const endDate = new Date();
             const startDate = new Date();
             startDate.setDate(endDate.getDate() - days);
@@ -331,6 +333,7 @@ const filterManager = {
             currentFilters.end_date = endDate.toISOString().split('T')[0];
         }
         
+        await dataLoader.loadStats();
         await dataLoader.loadLogs();
         this.applyClientFilters();
     },
@@ -338,6 +341,17 @@ const filterManager = {
     applyClientFilters() {
         let tempFilteredLogs = [...originalLogs];
         
+        // 비윤리점수 필터 (클라이언트 사이드)
+        const scoreFilter = elements.scoreFilter.value;
+        if (scoreFilter) {
+            const [min, max] = scoreFilter.split('-').map(Number);
+            tempFilteredLogs = tempFilteredLogs.filter(log => {
+                const score = parseFloat(log.score);
+                return score >= min && score <= max;
+            });
+        }
+        
+        // 스팸지수 필터 (클라이언트 사이드)
         const spamFilter = elements.spamFilter.value;
         if (spamFilter) {
             const [min, max] = spamFilter.split('-').map(Number);
@@ -347,6 +361,7 @@ const filterManager = {
             });
         }
         
+        // 검색 필터 (클라이언트 사이드)
         const searchTerm = elements.searchInput.value.toLowerCase().trim();
         if (searchTerm) {
             tempFilteredLogs = tempFilteredLogs.filter(log => 
@@ -371,11 +386,10 @@ const filterManager = {
     clearFilters() {
         elements.scoreFilter.value = '';
         elements.spamFilter.value = '';
-        elements.dateFilter.value = '7';
+        elements.dateFilter.value = '';
         elements.searchInput.value = '';
         currentFilters = {};
         currentPage = 0;
-        allLogs = [...originalLogs];
         dataLoader.loadLogs();
     }
 };
@@ -458,6 +472,11 @@ const oldLogsManager = {
         elements.deleteOldModal.classList.add('show');
         elements.deleteDays.value = '30';
         elements.previewCount.textContent = '-';
+        
+        // 모달이 열리면 자동으로 미리보기 실행
+        setTimeout(() => {
+            this.previewDeleteCount();
+        }, 100);
     },
     
     hideDeleteOldModal() {
@@ -468,26 +487,42 @@ const oldLogsManager = {
         const days = parseInt(elements.deleteDays.value);
         
         try {
-            utils.showLoading();
+            // 로딩 표시 없이 빠르게 계산
             
             if (days === 0) {
-                const response = await api.getStats(365);
-                elements.previewCount.textContent = response.total_count || 0;
+                // 모든 로그 삭제
+                const totalStats = await api.getStats(365); // 전체 통계
+                elements.previewCount.textContent = totalStats.total_count || 0;
             } else {
-                const response = await api.getStats(days);
-                elements.previewCount.textContent = response.total_count || 0;
+                // N일 이전 로그 삭제 = 전체 - 최근 N일
+                const totalStats = await api.getStats(365); // 전체
+                const recentStats = await api.getStats(days); // 최근 N일
+                
+                const totalCount = totalStats.total_count || 0;
+                const recentCount = recentStats.total_count || 0;
+                const oldCount = Math.max(0, totalCount - recentCount);
+                
+                elements.previewCount.textContent = oldCount;
             }
             
         } catch (error) {
             console.error('Preview failed:', error);
-            elements.previewCount.textContent = '-';
-        } finally {
-            utils.hideLoading();
+            elements.previewCount.textContent = '계산 실패';
         }
     },
     
     async confirmDeleteOld() {
         const days = parseInt(elements.deleteDays.value);
+        const previewCount = elements.previewCount.textContent;
+        
+        // 확인 메시지
+        const message = days === 0 
+            ? `정말로 모든 로그(약 ${previewCount}개)를 삭제하시겠습니까?`
+            : `정말로 ${days}일 이전 로그(약 ${previewCount}개)를 삭제하시겠습니까?`;
+        
+        if (!confirm(message)) {
+            return;
+        }
         
         try {
             utils.showLoading();
@@ -497,11 +532,11 @@ const oldLogsManager = {
             await dataLoader.loadStats();
             
             this.hideDeleteOldModal();
-            deleteManager.showSuccessMessage(`${result.deleted_count}개의 오래된 로그가 삭제되었습니다.`);
+            deleteManager.showSuccessMessage(`${result.deleted_count}개의 로그가 삭제되었습니다.`);
             
         } catch (error) {
             console.error('Old logs delete failed:', error);
-            deleteManager.showErrorMessage('오래된 로그 삭제에 실패했습니다: ' + error.message);
+            deleteManager.showErrorMessage('로그 삭제에 실패했습니다: ' + error.message);
         } finally {
             utils.hideLoading();
         }
@@ -570,8 +605,16 @@ const eventListeners = {
             filterManager.applyClientFilters();
         });
         
+        elements.scoreFilter.addEventListener('change', () => {
+            filterManager.applyClientFilters();
+        });
+        
         elements.spamFilter.addEventListener('change', () => {
             filterManager.applyClientFilters();
+        });
+        
+        elements.dateFilter.addEventListener('change', () => {
+            filterManager.applyFilters();
         });
         
         elements.firstPage.addEventListener('click', () => pagination.firstPage());
@@ -620,7 +663,7 @@ const eventListeners = {
             oldLogsManager.hideDeleteOldModal();
         });
         
-        elements.previewDelete.addEventListener('click', () => {
+        elements.deleteDays.addEventListener('change', () => {
             oldLogsManager.previewDeleteCount();
         });
         

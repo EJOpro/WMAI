@@ -327,8 +327,9 @@ class EthicsAnalyzeResponse(BaseModel):
     """Ethics 분석 응답 모델"""
     text: str
     score: float = Field(..., description="비윤리 점수 (0-100)")
-    confidence: float = Field(..., description="신뢰도 (0-100)")
+    confidence: float = Field(..., description="비윤리 신뢰도 (0-100)")
     spam: float = Field(..., description="스팸 지수 (0-100)")
+    spam_confidence: float = Field(..., description="스팸 신뢰도 (0-100)")
     types: List[str] = Field(..., description="분석 유형 목록")
 
 
@@ -339,6 +340,7 @@ def simplify_result(result: dict) -> dict:
         'score': round(result['final_score'], 1),
         'confidence': round(result['final_confidence'], 1),
         'spam': round(result['spam_score'], 1),
+        'spam_confidence': round(result['spam_confidence'], 1),
         'types': result['types']
     }
 
@@ -355,10 +357,10 @@ async def ethics_analyze(request_data: EthicsAnalyzeRequest, request: Request):
     """
     global ethics_analyzer
     
-    # 지연 로딩: 첫 호출 시 초기화
+    # 지연 로딩: 서버 시작 시 초기화 실패한 경우 재시도
     if ethics_analyzer is None:
         try:
-            print("[INFO] Ethics 분석기 초기화 중 (최초 호출 시 지연 로딩)...")
+            print("[INFO] Ethics 분석기 초기화 중 (재시도)...")
             from ethics.ethics_hybrid_predictor import HybridEthicsAnalyzer
             ethics_analyzer = HybridEthicsAnalyzer()
             print("[INFO] Ethics 분석기 초기화 완료")
@@ -385,6 +387,7 @@ async def ethics_analyze(request_data: EthicsAnalyzeRequest, request: Request):
                 score=simplified['score'],
                 confidence=simplified['confidence'],
                 spam=simplified['spam'],
+                spam_confidence=simplified['spam_confidence'],
                 types=simplified['types'],
                 ip_address=request.client.host,
                 user_agent=request.headers.get('user-agent'),

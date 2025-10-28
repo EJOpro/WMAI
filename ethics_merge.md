@@ -4,10 +4,10 @@ C:\Users\201\Downloads\ethics_data 에 있는 소스 분석해서 현재 프로�
 - 필요한 패키지는 requirements.txt에 추가해줘
 - .env 파일은 최상단에 있어. OPENAI_API_KEY, OPENAI_MODEL, DB_HOST, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 - 다음 구조 참고해줘
+ethics/                 # *추가되는 소스는 여기에 모아줘
 app/
 ├── main.py                 # FastAPI 엔트리포인트
 ├── settings.py             # 환경 설정
-├── ethics/                 # *추가되는 소스는 여기에 모아줘
 ├── api/
 │   ├── routes_public.py    # 페이지 라우팅
 │   └── routes_health.py    # 헬스체크

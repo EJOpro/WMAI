@@ -6,6 +6,7 @@ import os
 import json
 import re
 from typing import Dict, List, Optional
+from collections import Counter
 from dotenv import load_dotenv
 from openai import OpenAI
 from ethics.ethics_predict import EthicsPredictor
@@ -243,7 +244,53 @@ class HybridEthicsAnalyzer:
             if uppercase_ratio > 0.5:
                 score += 10
         
-        # 6. 짧은 텍스트는 스팸 가능성 낮음
+        # 6. 문장/구문 반복 감지 (100자 이상)
+        if len(text) >= 100:
+            max_repeat = 0
+            
+            # 방법 1: 줄바꿈으로 분할하여 체크
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            if len(lines) >= 3:
+                normalized_lines = [line.lower().replace(' ', '') for line in lines if len(line) > 5]
+                if normalized_lines:
+                    line_counts = Counter(normalized_lines)
+                    max_repeat = max(line_counts.values())
+            
+            # 방법 2: 단어/구문 단위 반복 체크 (공백이나 구두점으로 분할)
+            words = re.split(r'[\s,.!?;]+', text.lower())
+            words = [w.strip() for w in words if len(w.strip()) > 3]
+            if len(words) >= 5:
+                word_counts = Counter(words)
+                word_repeat = max(word_counts.values()) if word_counts else 0
+                max_repeat = max(max_repeat, word_repeat)
+            
+            # 방법 3: 연속된 동일 패턴 감지 (sliding window)
+            # 5-15자 길이의 패턴을 찾아서 반복 체크
+            for pattern_len in [5, 10, 15]:
+                if len(text) >= pattern_len * 3:
+                    patterns = []
+                    for i in range(0, len(text) - pattern_len + 1, pattern_len):
+                        pattern = text[i:i+pattern_len].lower().replace(' ', '').strip()
+                        if len(pattern) >= pattern_len * 0.8:  # 최소 80% 길이
+                            patterns.append(pattern)
+                    
+                    if patterns:
+                        pattern_counts = Counter(patterns)
+                        pattern_repeat = max(pattern_counts.values())
+                        max_repeat = max(max_repeat, pattern_repeat)
+            
+            # 5회 이상 반복 체크
+            if max_repeat >= 5:
+                # 기본 +50점 + 추가 반복마다 +6점
+                repeat_score = 50 + ((max_repeat - 5) * 6)
+                
+                # 15회 이상 극심한 반복 시 추가 보너스
+                if max_repeat >= 15:
+                    repeat_score += 20
+                
+                score += min(repeat_score, 100)  # 최대 100점
+        
+        # 7. 짧은 텍스트는 스팸 가능성 낮음
         if len(text) < 20 and score < 20:
             score *= 0.5
         
@@ -336,7 +383,25 @@ JSON 형식으로만 답변하세요."""
         profanity_boost = profanity_info['boost_score']
         
         # 5. 스팸 점수 결합
-        final_spam_score = (llm_spam_score * 0.6) + (rule_spam_score * 0.4)
+        # 규칙 기반 점수가 매우 높으면 (극심한 반복 등) 가중치 조정
+        if rule_spam_score >= 80:
+            # 극심한 스팸 패턴 감지 시 규칙 기반 우선
+            final_spam_score = (llm_spam_score * 0.3) + (rule_spam_score * 0.7)
+        else:
+            final_spam_score = (llm_spam_score * 0.6) + (rule_spam_score * 0.4)
+        
+        # 5-1. 스팸 신뢰도 계산 (별도)
+        # 규칙 기반은 명확한 패턴 매칭이므로 높은 신뢰도
+        # 점수가 높을수록 확실한 스팸 패턴이 있다는 의미
+        if rule_spam_score > 60:
+            rule_confidence = 95.0  # 명확한 스팸 패턴
+        elif rule_spam_score > 30:
+            rule_confidence = 85.0  # 중간 수준의 스팸 패턴
+        else:
+            rule_confidence = 70.0  # 스팸 패턴이 적음
+        
+        # LLM과 규칙 기반의 신뢰도를 가중 평균으로 결합
+        spam_confidence = (llm_confidence * 0.6) + (rule_confidence * 0.4)
         
         result.update({
             'llm_score': llm_score,
@@ -344,6 +409,7 @@ JSON 형식으로만 답변하세요."""
             'llm_spam_score': llm_spam_score,
             'rule_spam_score': rule_spam_score,
             'spam_score': final_spam_score,
+            'spam_confidence': spam_confidence,
             'types': llm_result['types'],
             'profanity_detected': profanity_info['profanity_detected'],
             'profanity_count': profanity_info['profanity_count'],

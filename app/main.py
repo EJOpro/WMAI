@@ -77,10 +77,16 @@ async def startup_event():
     print("Health: http://localhost:8000/health")
     print("="*50 + "\n")
     
-    # Ethics 분석기 초기화는 지연 로딩 방식으로 변경
-    # API 호출 시점에 초기화되므로 서버 시작을 막지 않음
-    print("[INFO] Ethics 분석기는 최초 API 호출 시 초기화됩니다.")
-    print("       (BERT 모델 로딩으로 인한 시작 지연을 방지하기 위함)")
+    # Ethics 분석기 초기화 (서버 시작 시)
+    print("[INFO] Ethics 분석기 초기화 중...")
+    try:
+        from ethics.ethics_hybrid_predictor import HybridEthicsAnalyzer
+        from app.api import routes_api
+        routes_api.ethics_analyzer = HybridEthicsAnalyzer()
+        print("[OK] Ethics 분석기 초기화 완료")
+    except Exception as e:
+        print(f"[WARN] Ethics 분석기 초기화 실패: {e}")
+        print("       첫 API 호출 시 재시도됩니다.")
 
 # 종료 이벤트
 @app.on_event("shutdown")

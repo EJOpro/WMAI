@@ -828,9 +828,9 @@ tbody tr:hover {
 
 .type-tag {
     display: inline-block;
-    padding: 8px 16px;
+    padding: 8px 12px;
     border-radius: 20px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     margin: 2px;
     border: 1px solid transparent;
@@ -1123,12 +1123,14 @@ table th {
     font-weight: 600;
     color: #2c3e50;
     border-bottom: 2px solid #e1e8ed;
+    font-size: 15px;
     word-break: keep-all;
 }
 
 table td {
     padding: 12px 10px;
     border-bottom: 1px solid #e1e8ed;
+    font-size: 15px;
 }
 
 
@@ -1146,6 +1148,10 @@ table tbody tr:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.type-tags {
+    max-width: 140px;
 }
 
 .score-high {
@@ -1190,6 +1196,10 @@ table tbody tr:hover {
     display: inline-flex;
     align-items: center;
     gap: 5px;
+}
+
+.btn-delete span {
+    word-break: keep-all;
 }
 
 .btn-delete:hover {

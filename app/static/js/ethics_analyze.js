@@ -200,9 +200,10 @@ const analyzer = {
         const score = parseFloat(result.score);
         const confidence = parseFloat(result.confidence);
         const spam = parseFloat(result.spam);
+        const spamConfidence = parseFloat(result.spam_confidence || result.confidence);
         
         elements.scoreValue.innerHTML = `${utils.formatScore(score)} <small>(${utils.formatScore(confidence)})</small>`;
-        elements.spamValue.innerHTML = `${utils.formatScore(spam)} <small>(${utils.formatScore(confidence)})</small>`;
+        elements.spamValue.innerHTML = `${utils.formatScore(spam)} <small>(${utils.formatScore(spamConfidence)})</small>`;
         
         elements.scoreCard.className = `score-card ${utils.getScoreClass(score)}`;
         elements.spamCard.className = `score-card ${utils.getSpamClass(spam)}`;
