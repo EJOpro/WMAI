@@ -1,12 +1,18 @@
 """
-💚 헬스체크 라우터
+헬스체크 라우터
 서버 상태 모니터링용
 """
 
 from fastapi import APIRouter
 from datetime import datetime
 import sys
-import psutil  # 시스템 리소스 확인 (선택사항)
+
+# psutil은 optional 의존성
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -23,14 +29,17 @@ async def health_check():
     
     try:
         # 시스템 정보 (psutil 있을 때만)
-        try:
-            cpu_percent = psutil.cpu_percent()
-            memory_percent = psutil.virtual_memory().percent
-            system_info = {
-                "cpu_usage": f"{cpu_percent}%",
-                "memory_usage": f"{memory_percent}%"
-            }
-        except:
+        if PSUTIL_AVAILABLE:
+            try:
+                cpu_percent = psutil.cpu_percent()
+                memory_percent = psutil.virtual_memory().percent
+                system_info = {
+                    "cpu_usage": f"{cpu_percent}%",
+                    "memory_usage": f"{memory_percent}%"
+                }
+            except:
+                system_info = {"note": "psutil error"}
+        else:
             system_info = {"note": "psutil not installed"}
         
         return {

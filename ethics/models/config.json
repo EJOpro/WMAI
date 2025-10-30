@@ -1,0 +1,5 @@
+{
+  "model_name": "beomi/kcbert-base",
+  "max_len": 128,
+  "batch_size": 16
+}

@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}이탈자 분석 시스템 - Community Admin{% endblock %}
+
+{% block extra_css %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/chrun_styles.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>이탈자 분석 시스템</h1>
+    <p>사용자 이탈률 및 세그먼트 분석 대시보드</p>
+</div>
+
+<div class="churn-dashboard">
+    <div class="churn-layout">
+        <!-- 사이드바 (설정 패널) -->
+        <nav class="sidebar">
+                <div class="sidebar-inner">
+                    <h5 class="sidebar-heading">
+                        <i class="fas fa-cog"></i> 설정 (Configuration)
+                    </h5>
+
+                    <!-- 데이터 업로드 섹션 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-upload"></i> 데이터 업로드
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <input type="file" class="form-control" id="csvFile" accept=".csv">
+                            </div>
+                            <button class="btn btn-primary btn-large btn-block" id="uploadBtn">
+                                <i class="fas fa-cloud-upload-alt"></i> 업로드 실행
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 분석 기간 설정 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-calendar"></i> 분석 기간
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <label class="form-label">시작일:</label>
+                                <input type="date" class="form-control" id="startDate" value="2025-08-01">
+                            </div>
+                            <div class="form-row">
+                                <label class="form-label">종료일:</label>
+                                <input type="date" class="form-control" id="endDate" value="2025-10-31">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 세그먼트 옵션 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-users"></i> 세그먼트 분석
+                        </div>
+                        <div class="card-body">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="channelSegment" checked>
+                                <label class="form-check-label" for="channelSegment">
+                                    채널 (Channel)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="actionType" checked>
+                                <label class="form-check-label" for="actionType">
+                                    이벤트 타입
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- 실행 버튼 -->
+                    <button class="btn btn-primary btn-large btn-block" id="runAnalysisBtn">
+                        <i class="fas fa-play"></i> 분석 실행
+                    </button>
+
+                    <!-- 진행 상태 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-tasks"></i> 실행 상태
+                        </div>
+                        <div class="card-body">
+                            <div class="progress">
+                                <div class="progress-bar" role="progressbar" style="width: 0%" id="progressBar"></div>
+                            </div>
+                            <small class="muted" id="progressText">대기 중...</small>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- 메인 콘텐츠 영역 -->
+            <main class="content">
+                <!-- 탭 네비게이션 -->
+                <div class="tabs-header">
+                    <ul class="tabs" id="mainTabs">
+                        <li><a class="tab-link active" data-tab="#dashboard" href="#dashboard"><i class="fas fa-tachometer-alt"></i> 대시보드</a></li>
+                        <li><a class="tab-link" data-tab="#report" href="#report"><i class="fas fa-file-alt"></i> 리포트</a></li>
+                    </ul>
+                </div>
+
+                <div class="tab-content">
+                    <!-- 대시보드 탭 -->
+                    <div class="tab-pane active" id="dashboard">
+                        <!-- 주요 지표 카드들 -->
+                        <!-- 분석 상태 및 가이드 -->
+                        <div class="stats-grid">
+                            <div>
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-file-csv icon-secondary"></i>
+                                        <h6 class="card-subtitle">데이터 상태</h6>
+                                        <h5 class="card-title" id="dataStatus">파일 없음</h5>
+                                        <small class="muted" id="dataInfo">CSV 파일을 업로드하세요</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-calendar-alt icon-info"></i>
+                                        <h6 class="card-subtitle">분석 기간</h6>
+                                        <h5 class="card-title" id="periodStatus">미설정</h5>
+                                        <small class="muted" id="periodInfo">날짜를 선택하세요</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-chart-line icon-success"></i>
+                                        <h6 class="card-subtitle">분석 상태</h6>
+                                        <h5 class="card-title" id="analysisStatus">대기중</h5>
+                                        <small class="muted" id="analysisInfo">분석 실행을 클릭하세요</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-lightbulb icon-warning"></i>
+                                        <h6 class="card-subtitle">빠른 도움말</h6>
+                                        <h5 class="card-title">3단계</h5>
+                                        <small class="muted">파일 → 기간 → 분석</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 분석 결과 카드 (분석 후에만 표시) -->
+                        <div class="stats-grid" id="metricsRow" style="display: none;">
+                            <div>
+                                <div class="card text-center metric-card">
+                                    <div class="card-body">
+                                        <h6 class="card-subtitle mb-2 text-muted">전체 이탈률</h6>
+                                        <h2 class="card-title text-danger" id="churnRate">-</h2>
+                                        <p class="card-text">
+                                            <span class="badge" id="churnSeverity">분석필요</span><br>
+                                            <small class="muted">이탈자 <strong id="churnedCount">-</strong>명</small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card text-center metric-card">
+                                    <div class="card-body">
+                                        <h6 class="card-subtitle mb-2 text-muted">활성 사용자</h6>
+                                        <h2 class="card-title text-primary" id="activeUsers">-</h2>
+                                        <p class="card-text">
+                                            <span class="badge" id="userTrend">분석필요</span><br>
+                                            <small class="muted">증감률 <strong id="userGrowthRate">-</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card text-center metric-card">
+                                    <div class="card-body">
+                                        <h6 class="card-subtitle mb-2 text-muted">재활성 사용자</h6>
+                                        <h2 class="card-title text-success" id="reactivatedUsers">-</h2>
+                                        <p class="card-text">
+                                            <span class="badge" id="reactivationRate">분석필요</span><br>
+                                            <small class="muted">복귀율 <strong id="returnPattern">-</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card text-center metric-card">
+                                    <div class="card-body">
+                                        <h6 class="card-subtitle mb-2 text-muted">장기 미접속</h6>
+                                        <h2 class="card-title text-warning" id="longTermInactive">-</h2>
+                                        <p class="card-text">
+                                            <span class="badge" id="riskLevel">분석필요</span><br>
+                                            <small class="muted">위험도 <strong id="lossRisk">-</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        
+
+                    </div>
+
+                    <!-- 리포트 탭 -->
+                    <div class="tab-pane" id="report">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-file-alt"></i> AI 기반 이탈 분석 리포트
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <!-- 주요 인사이트 -->
+                                <div class="section-block">
+                                    <h6 class="section-title">
+                                        <i class="fas fa-search"></i> 주요 인사이트 (Top 3)
+                                    </h6>
+                                    <ul class="plain-list">
+                                        <li>
+                                            <i class="fas fa-circle" style="font-size: 0.5rem; color: var(--text-light);"></i>
+                                            분석을 실행하면 AI 기반 인사이트가 표시됩니다.
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <!-- 권장 액션 -->
+                                <div class="section-block">
+                                    <h6 class="section-title">
+                                        <i class="fas fa-lightbulb"></i> 권장 액션 (Top 3)
+                                    </h6>
+                                    <ul class="plain-list">
+                                        <li>
+                                            <i class="fas fa-arrow-right" style="color: var(--text-light);"></i>
+                                            분석을 실행하면 맞춤형 권장 액션이 표시됩니다.
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <!-- 세그먼트 분석 결과 -->
+                                <div class="section-block">
+                                    <h6 class="section-title">
+                                        <i class="fas fa-chart-pie"></i> 세그먼트별 분석 결과
+                                    </h6>
+                                    <div id="segmentAnalysisResults">
+                                        <ul class="plain-list">
+                                            <li>
+                                                <i class="fas fa-circle" style="font-size: 0.5rem; color: var(--text-light);"></i>
+                                                분석을 실행하면 세그먼트별 상세 결과가 표시됩니다.
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='/js/chrun_script.js') }}"></script>
+<script>
+// 간단한 탭 전환 (Bootstrap 없이)
+document.querySelectorAll('.tab-link').forEach(function(tab){
+  tab.addEventListener('click', function(e){
+    e.preventDefault();
+    const target = this.getAttribute('data-tab');
+    document.querySelectorAll('.tab-link').forEach(el=>el.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(el=>el.classList.remove('active'));
+    this.classList.add('active');
+    const pane = document.querySelector(target);
+    if (pane) pane.classList.add('active');
+  });
+});
+</script>
+{% endblock %}
