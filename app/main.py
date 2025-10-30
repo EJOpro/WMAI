@@ -55,9 +55,29 @@ try:
     app.include_router(routes_public.router)
     app.include_router(routes_health.router)
     app.include_router(routes_api.router, prefix="/api")
-    print("[OK] 라우터 등록 완료")
+    print("[OK] 기본 라우터 등록 완료")
 except ImportError as e:
-    print(f"[WARN] 라우터 임포트 실패: {e}")
+    print(f"[WARN] 기본 라우터 임포트 실패: {e}")
+
+# 이탈 분석 대시보드 라우터 등록
+try:
+    from chrun_backend.chrun_main import router as churn_router
+    from chrun_backend.chrun_database import init_db
+    
+    # 데이터베이스 초기화
+    init_db()
+    print("[OK] 데이터베이스 초기화 완료")
+    
+    app.include_router(
+        churn_router,
+        prefix="/api/churn",
+        tags=["churn-analysis"]
+    )
+    print("[OK] 이탈 분석 라우터 등록 완료")
+except ImportError as e:
+    print(f"[WARN] 이탈 분석 라우터 임포트 실패: {e}")
+except Exception as e:
+    print(f"[ERROR] 데이터베이스 초기화 실패: {e}")
 
 # 정적 파일 마운트 (라우터보다 나중에 마운트하여 라우트 우선순위 확보)
 try:
@@ -65,6 +85,14 @@ try:
     print("[OK] 정적 파일 디렉토리 마운트 완료")
 except Exception as e:
     print(f"[WARN] 정적 파일 마운트 실패: {e}")
+
+# 이탈 분석 대시보드 정적 파일 서빙
+try:
+    app.mount("/chrun_static", StaticFiles(directory="chrun_dashboard"), name="chrun_static")
+    print("[OK] 이탈 분석 대시보드 정적 파일 마운트 완료")
+except Exception as e:
+    print(f"[WARN] 이탈 분석 대시보드 정적 파일 마운트 실패: {e}")
+
 
 # 시작 이벤트
 @app.on_event("startup")

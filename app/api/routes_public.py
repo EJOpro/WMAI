@@ -61,3 +61,11 @@ async def ethics_dashboard(request: Request):
         {"request": request, "title": "로그기록 대시보드"}
     )
 
+@router.get("/churn", response_class=HTMLResponse)
+async def churn_dashboard(request: Request):
+    """이탈자 분석 시스템"""
+    return templates.TemplateResponse(
+        "pages/churn.html",
+        {"request": request, "title": "이탈자 분석 시스템"}
+    )
+

@@ -11,7 +11,7 @@ FastAPI 기반의 통합 웹 애플리케이션으로, 커뮤니티 관리, 비�
 ### 1. 커뮤니티 관리 대시보드
 - **자연어 검색** - 커뮤니티 내 게시글 검색
 - **API 콘솔** - API 요청 테스트 인터페이스
-- **방문객 이탈률 분석** - 이탈률 데이터 시각화
+- **이탈 분석 대시보드** - 사용자 이탈률 및 세그먼트 분석
 - **신고글 분류평가** - 카테고리별 신고 통계
 
 ### 2. Ethics 분석 시스템
@@ -20,7 +20,14 @@ FastAPI 기반의 통합 웹 애플리케이션으로, 커뮤니티 관리, 비�
 - **로그 대시보드** - 분석 이력 조회 및 통계
 - **실시간 분석 API** - `/api/ethics/analyze` 엔드포인트
 
-### 3. 트렌드 분석 시스템 (TrendStream)
+### 3. 이탈 분석 대시보드 (Churn Analysis)
+- **CSV 데이터 업로드** - 사용자 이벤트 데이터 업로드
+- **기간별 분석** - 특정 기간 동안의 이탈률 분석
+- **세그먼트 분석** - 성별, 연령대, 채널별 세그먼트 분석
+- **시각화** - 차트와 지표를 통한 분석 결과 표시
+- **LLM 통합** - AI 기반 분석 인사이트 제공
+
+### 4. 트렌드 분석 시스템 (TrendStream)
 - **실시간 트렌드 수집** - dad.dothome.co.kr API 연동
 - **키워드 정규화** - 자연어 → 표준 키워드 변환
 - **타임라인 분석** - 날짜별 검색 트렌드 추적
@@ -105,6 +112,19 @@ WMAI/
 │   ├── ethics_train_model.py   # 모델 학습
 │   └── models/                 # ML 모델 설정
 │
+├── chrun_backend/              # 이탈 분석 백엔드 로직
+│   ├── chrun_main.py           # FastAPI 라우터
+│   ├── chrun_analytics.py      # 분석 엔진
+│   ├── chrun_models.py         # 데이터베이스 모델
+│   ├── chrun_schemas.py        # API 스키마
+│   └── chrun_database.py       # 데이터베이스 연결
+│
+├── chrun_dashboard/            # 프론트엔드 대시보드
+│   ├── churn.html              # 메인 대시보드 화면
+│   ├── chrun_styles.css        # 스타일시트
+│   ├── chrun_script.js         # 프론트엔드 로직
+│   └── chrun_api_client.js     # API 통신 로직
+│
 ├── trend/                      # TrendStream 백엔드
 │   ├── backend/
 │   │   ├── main.py             # TrendStream API 서버
@@ -137,10 +157,16 @@ WMAI/
 - `DELETE /api/ethics/logs/{log_id}` - 로그 삭제
 - `DELETE /api/ethics/logs/batch/old` - 오래된 로그 일괄 삭제
 
+#### 이탈 분석 API
+- `POST /api/churn/upload` - CSV 데이터 업로드
+- `GET /api/churn/analyze` - 이탈률 분석 실행
+- `GET /api/churn/metrics` - 월별 지표 조회
+- `GET /api/churn/segments` - 세그먼트별 분석 결과
+
 #### 프론트엔드 라우트
 - `GET /` - 메인 페이지
 - `GET /api-console` - API 콘솔
-- `GET /bounce` - 이탈률 대시보드
+- `GET /churn` - 이탈 분석 대시보드
 - `GET /trends` - 트렌드 대시보드
 - `GET /reports` - 신고글 분류
 - `GET /ethics_analyze` - 비윤리/스팸지수 평가
@@ -193,6 +219,21 @@ JavaScript에서 API 호출:
 const data = await apiRequest('/api/trends?limit=50');
 console.log(data.keywords);
 ```
+
+### 이탈 분석 대시보드 통합
+
+#### 접근 방법
+1. 홈페이지(`/`) 접속
+2. "이탈 분석 대시보드" 카드의 "이탈 분석 대시보드" 버튼 클릭
+3. 이탈 분석 대시보드(`/churn`) 페이지로 이동
+
+#### 사용 흐름
+1. CSV 파일 업로드 (user_hash, created_at, action, gender, age_band, channel 컬럼 필요)
+2. 분석 기간 설정 (시작일, 종료일)
+3. 세그먼트 선택 (성별, 연령대, 채널)
+4. "분석 실행" 버튼 클릭
+5. 이탈률, 활성 사용자 수, 장기 미접속 사용자 등 지표 확인
+6. 차트를 통한 시각적 분석 결과 확인
 
 ### Ethics 분석 사용 예시
 
