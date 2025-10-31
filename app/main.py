@@ -21,6 +21,10 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 환경 변수 로드 (match_config.env 파일)
+load_dotenv('match_config.env')
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -49,50 +53,84 @@ if not STATIC_DIR.exists():
     (STATIC_DIR / "js").mkdir(exist_ok=True)
     (STATIC_DIR / "img").mkdir(exist_ok=True)
 
-# 라우터 등록 (정적 파일보다 먼저 등록)
-try:
-    from app.api import routes_public, routes_health, routes_api
-    app.include_router(routes_public.router)
-    app.include_router(routes_health.router)
-    app.include_router(routes_api.router, prefix="/api")
-    print("[OK] 기본 라우터 등록 완료")
-except ImportError as e:
-    print(f"[WARN] 기본 라우터 임포트 실패: {e}")
-
-# 이탈 분석 대시보드 라우터 등록
-try:
-    from chrun_backend.chrun_main import router as churn_router
-    from chrun_backend.chrun_database import init_db
-    
-    # 데이터베이스 초기화
-    init_db()
-    print("[OK] 데이터베이스 초기화 완료")
-    
-    app.include_router(
-        churn_router,
-        prefix="/api/churn",
-        tags=["churn-analysis"]
-    )
-    print("[OK] 이탈 분석 라우터 등록 완료")
-except ImportError as e:
-    print(f"[WARN] 이탈 분석 라우터 임포트 실패: {e}")
-except Exception as e:
-    print(f"[ERROR] 데이터베이스 초기화 실패: {e}")
-
-# 정적 파일 마운트 (라우터보다 나중에 마운트하여 라우트 우선순위 확보)
+# 정적 파일 마운트
 try:
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
     print("[OK] 정적 파일 디렉토리 마운트 완료")
 except Exception as e:
     print(f"[WARN] 정적 파일 마운트 실패: {e}")
 
-# 이탈 분석 대시보드 정적 파일 서빙
+# 라우터 등록
 try:
-    app.mount("/chrun_static", StaticFiles(directory="chrun_dashboard"), name="chrun_static")
-    print("[OK] 이탈 분석 대시보드 정적 파일 마운트 완료")
-except Exception as e:
-    print(f"[WARN] 이탈 분석 대시보드 정적 파일 마운트 실패: {e}")
+    from app.api import routes_public, routes_health, routes_api, routes_match
+    app.include_router(routes_public.router)
+    app.include_router(routes_health.router)
+    app.include_router(routes_api.router, prefix="/api")
+    app.include_router(routes_match.router, prefix="/api")  # WMAA 신고 검증 API
+    print("[OK] 기본 라우터 등록 완료 (WMAA 포함)")
+except ImportError as e:
+    print(f"[WARN] 라우터 임포트 실패: {e}")
+    # 기본 라우트만 제공
+    pass
 
+# 루트 경로 (메인 페이지)
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """메인 페이지 - index_main.html 반환"""
+    html_file = Path("index_main.html")
+    if html_file.exists():
+        return FileResponse("index_main.html")
+    
+    # 파일이 없으면 간단한 웰컴 페이지
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Community Admin</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+            .container {
+                text-align: center;
+                background: rgba(255,255,255,0.1);
+                padding: 40px;
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+            }
+            h1 { margin: 0 0 20px 0; }
+            a {
+                color: white;
+                text-decoration: none;
+                background: rgba(255,255,255,0.2);
+                padding: 10px 20px;
+                border-radius: 5px;
+                display: inline-block;
+                margin: 5px;
+            }
+            a:hover { background: rgba(255,255,255,0.3); }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>FastAPI Server Running!</h1>
+            <p>Community Admin Dashboard</p>
+            <div style="margin-top: 20px;">
+                <a href="/docs">API Documentation</a>
+                <a href="/health">Health Check</a>
+                <a href="/test.html">Test Page</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 # 시작 이벤트
 @app.on_event("startup")
@@ -103,6 +141,16 @@ async def startup_event():
     print("Server: http://localhost:8000")
     print("API Docs: http://localhost:8000/docs")
     print("Health: http://localhost:8000/health")
+    print("WMAA Reports: http://localhost:8000/reports")
+    print("WMAA Admin: http://localhost:8000/reports/admin")
+    
+    # API 키 상태 확인
+    api_key = os.getenv('OPENAI_API_KEY', '')
+    if api_key and api_key != 'your-api-key-here':
+        print(f"✅ OpenAI API Key: {api_key[:10]}...{api_key[-4:]} (로드됨)")
+    else:
+        print("❌ OpenAI API Key: 설정되지 않음 (match_config.env 파일 확인 필요)")
+    
     print("="*50 + "\n")
     
     # Ethics 분석기 초기화 (서버 시작 시)

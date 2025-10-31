@@ -41,7 +41,7 @@ async def trends(request: Request):
 async def reports(request: Request):
     """신고글 분류평가"""
     return templates.TemplateResponse(
-        "pages/reports.html",
+        "pages/match_reports.html",
         {"request": request, "title": "신고글 분류"}
     )
 
@@ -67,5 +67,13 @@ async def churn_dashboard(request: Request):
     return templates.TemplateResponse(
         "pages/churn.html",
         {"request": request, "title": "이탈자 분석 시스템"}
+    )
+
+@router.get("/reports/admin", response_class=HTMLResponse)
+async def reports_admin(request: Request):
+    """신고 관리 페이지"""
+    return templates.TemplateResponse(
+        "pages/match_reports_admin.html",
+        {"request": request, "title": "신고 관리"}
     )
 
