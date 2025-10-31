@@ -45,12 +45,28 @@ async def reports(request: Request):
         {"request": request, "title": "신고글 분류"}
     )
 
-@router.get("/hate", response_class=HTMLResponse)
-async def hate(request: Request):
-    """혐오지수 평가"""
+@router.get("/ethics_analyze", response_class=HTMLResponse)
+async def ethics_analyze(request: Request):
+    """비윤리/스팸지수 평가"""
     return templates.TemplateResponse(
-        "pages/hate.html",
-        {"request": request, "title": "혐오지수 평가"}
+        "pages/ethics_analyze.html",
+        {"request": request, "title": "비윤리/스팸지수 평가"}
+    )
+
+@router.get("/ethics_dashboard", response_class=HTMLResponse)
+async def ethics_dashboard(request: Request):
+    """로그기록 대시보드"""
+    return templates.TemplateResponse(
+        "pages/ethics_dashboard.html",
+        {"request": request, "title": "로그기록 대시보드"}
+    )
+
+@router.get("/churn", response_class=HTMLResponse)
+async def churn_dashboard(request: Request):
+    """이탈자 분석 시스템"""
+    return templates.TemplateResponse(
+        "pages/churn.html",
+        {"request": request, "title": "이탈자 분석 시스템"}
     )
 
 @router.get("/reports/admin", response_class=HTMLResponse)

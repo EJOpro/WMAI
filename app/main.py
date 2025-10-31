@@ -1,11 +1,19 @@
 """
-🚀 FastAPI 메인 서버
+FastAPI 메인 서버
 시니어의 코딩 원칙:
 1. 명확한 주석
 2. 에러 처리
 3. 로깅
 4. 환경 변수 사용
 """
+
+import sys
+import io
+
+# Windows에서 UTF-8 출력 설정
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True)
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -59,7 +67,7 @@ try:
     app.include_router(routes_health.router)
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_match.router, prefix="/api")  # WMAA 신고 검증 API
-    print("[OK] 라우터 등록 완료 (WMAA 포함)")
+    print("[OK] 기본 라우터 등록 완료 (WMAA 포함)")
 except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
     # 기본 라우트만 제공
@@ -144,6 +152,17 @@ async def startup_event():
         print("❌ OpenAI API Key: 설정되지 않음 (match_config.env 파일 확인 필요)")
     
     print("="*50 + "\n")
+    
+    # Ethics 분석기 초기화 (서버 시작 시)
+    print("[INFO] Ethics 분석기 초기화 중...")
+    try:
+        from ethics.ethics_hybrid_predictor import HybridEthicsAnalyzer
+        from app.api import routes_api
+        routes_api.ethics_analyzer = HybridEthicsAnalyzer()
+        print("[OK] Ethics 분석기 초기화 완료")
+    except Exception as e:
+        print(f"[WARN] Ethics 분석기 초기화 실패: {e}")
+        print("       첫 API 호출 시 재시도됩니다.")
 
 # 종료 이벤트
 @app.on_event("shutdown")
