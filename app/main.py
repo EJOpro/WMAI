@@ -13,6 +13,10 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 환경 변수 로드 (match_config.env 파일)
+load_dotenv('match_config.env')
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -50,11 +54,12 @@ except Exception as e:
 
 # 라우터 등록
 try:
-    from app.api import routes_public, routes_health, routes_api
+    from app.api import routes_public, routes_health, routes_api, routes_match
     app.include_router(routes_public.router)
     app.include_router(routes_health.router)
     app.include_router(routes_api.router, prefix="/api")
-    print("[OK] 라우터 등록 완료")
+    app.include_router(routes_match.router, prefix="/api")  # WMAA 신고 검증 API
+    print("[OK] 라우터 등록 완료 (WMAA 포함)")
 except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
     # 기본 라우트만 제공
@@ -128,6 +133,16 @@ async def startup_event():
     print("Server: http://localhost:8000")
     print("API Docs: http://localhost:8000/docs")
     print("Health: http://localhost:8000/health")
+    print("WMAA Reports: http://localhost:8000/reports")
+    print("WMAA Admin: http://localhost:8000/reports/admin")
+    
+    # API 키 상태 확인
+    api_key = os.getenv('OPENAI_API_KEY', '')
+    if api_key and api_key != 'your-api-key-here':
+        print(f"✅ OpenAI API Key: {api_key[:10]}...{api_key[-4:]} (로드됨)")
+    else:
+        print("❌ OpenAI API Key: 설정되지 않음 (match_config.env 파일 확인 필요)")
+    
     print("="*50 + "\n")
 
 # 종료 이벤트

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>신고내역 관리 시스템 (Report Management Dashboard)</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/match_admin_bootstrap_replacement.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/match_admin_styles.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <a href="/" style="display: flex; align-items: center;">
+                    <img src="/static/img/sub_home.png" alt="Logo" style="height: 40px; width: auto; object-fit: contain;">
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/" class="nav-link">홈</a></li>
+                <li><a href="/api-console" class="nav-link">API 콘솔</a></li>
+                <li><a href="/bounce" class="nav-link">이탈률</a></li>
+                <li><a href="/trends" class="nav-link">트렌드</a></li>
+                <li><a href="/reports" class="nav-link">신고 분류</a></li>
+                <li><a href="/hate" class="nav-link">혐오지수</a></li>
+            </ul>
+            <button class="nav-toggle" aria-label="메뉴 토글">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 사이드바 (필터 및 설정) -->
+            <nav class="col-md-3 col-lg-2 d-md-block bg-light sidebar">
+                <div class="position-sticky pt-3">
+                    <h5 class="sidebar-heading">
+                        <i class="fas fa-filter me-2"></i>필터 및 설정
+                    </h5>
+
+                    <!-- 신고 상태 필터 -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="fas fa-flag me-2"></i>신고 상태
+                        </div>
+                        <div class="card-body">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="statusPending" checked>
+                                <label class="form-check-label" for="statusPending">
+                                    대기중 <span class="badge bg-warning text-dark ms-1" id="pendingCount">0</span>
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="statusCompleted" checked>
+                                <label class="form-check-label" for="statusCompleted">
+                                    승인 <span class="badge bg-success ms-1" id="completedCount">0</span>
+                                </label>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="statusRejected" checked>
+                                <label class="form-check-label" for="statusRejected">
+                                    반려 <span class="badge bg-danger ms-1" id="rejectedCount">0</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 신고 유형 필터 -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="fas fa-tags me-2"></i>신고 유형
+                        </div>
+                        <div class="card-body">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="typeAbuse" checked>
+                                <label class="form-check-label" for="typeAbuse">
+                                    욕설 및 비방
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="typeSpam" checked>
+                                <label class="form-check-label" for="typeSpam">
+                                    도배 및 광고
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="typePrivacy" checked>
+                                <label class="form-check-label" for="typePrivacy">
+                                    사생활 침해
+                                </label>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="typeCopyright" checked>
+                                <label class="form-check-label" for="typeCopyright">
+                                    저작권 침해
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 기간 필터 -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="fas fa-calendar me-2"></i>신고 기간
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <label class="form-label">시작일:</label>
+                                <input type="date" class="form-control form-control-sm" id="startDate" value="2025-10-01">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">종료일:</label>
+                                <input type="date" class="form-control form-control-sm" id="endDate" value="2025-10-31">
+                            </div>
+                            <button class="btn btn-outline-primary btn-sm w-100 mt-2" id="applyFilter">
+                                <i class="fas fa-search me-1"></i>필터 적용
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 빠른 액션 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-bolt me-2"></i>빠른 액션
+                        </div>
+                        <div class="card-body">
+                            <button class="btn btn-success btn-sm w-100 mb-2" id="refreshData">
+                                <i class="fas fa-sync-alt me-1"></i>데이터 새로고침
+                            </button>
+                            <button class="btn btn-info btn-sm w-100 mb-2" id="exportData">
+                                <i class="fas fa-download me-1"></i>데이터 내보내기
+                            </button>
+                            <button class="btn btn-warning btn-sm w-100" id="bulkAction">
+                                <i class="fas fa-tasks me-1"></i>일괄 처리
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- 메인 콘텐츠 영역 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+
+                    <!-- 헤더 -->
+                <div class="page-header">
+                    <h1>신고내역 관리 시스템</h1>
+                </div>
+
+
+                <!-- 탭 네비게이션 -->
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3">
+                    <ul class="nav nav-tabs" id="mainTabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" data-bs-toggle="tab" href="#dashboard">
+                                <i class="fas fa-tachometer-alt me-1"></i>대시보드
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#reports">
+                                <i class="fas fa-list me-1"></i>신고 목록
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#analytics">
+                                <i class="fas fa-chart-bar me-1"></i>통계 분석
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="tab-content">
+                    <!-- 대시보드 탭 -->
+                    <div class="tab-pane fade show active" id="dashboard">
+                        <!-- 주요 지표 카드들 -->
+                        <div class="row mb-4">
+                            <div class="col-md-3">
+                                <div class="card text-center metric-card clickable-card" onclick="showPendingReports()">
+                                    <div class="card-body">
+                                        <i class="fas fa-exclamation-triangle fa-2x text-warning mb-2"></i>
+                                        <h6 class="card-subtitle mb-2 text-muted">대기중 신고</h6>
+                                        <h2 class="card-title text-warning" id="pendingReports">12</h2>
+                                        <p class="card-text">
+                                            <span class="badge bg-warning text-dark">긴급 처리 필요</span><br>
+                                            <small class="text-muted">평균 대기시간: <strong>2.3시간</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card text-center metric-card clickable-card" onclick="showCompletedReports()">
+                                    <div class="card-body">
+                                        <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                                        <h6 class="card-subtitle mb-2 text-muted">승인된 신고</h6>
+                                        <h2 class="card-title text-success" id="completedReports">156</h2>
+                                        <p class="card-text">
+                                            <span class="badge bg-success">이번 달</span><br>
+                                            <small class="text-muted">처리율: <strong>94.2%</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card text-center metric-card clickable-card" onclick="showRejectedReports()">
+                                    <div class="card-body">
+                                        <i class="fas fa-times-circle fa-2x text-danger mb-2"></i>
+                                        <h6 class="card-subtitle mb-2 text-muted">반려된 신고</h6>
+                                        <h2 class="card-title text-danger" id="rejectedReports">0</h2>
+                                        <p class="card-text">
+                                            <span class="badge bg-danger">이번 달</span><br>
+                                            <small class="text-muted">반려율: <strong>5.8%</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card text-center metric-card">
+                                    <div class="card-body">
+                                        <i class="fas fa-chart-line fa-2x text-primary mb-2"></i>
+                                        <h6 class="card-subtitle mb-2 text-muted">AI 정확도</h6>
+                                        <h2 class="card-title text-primary" id="aiAccuracy">87.3%</h2>
+                                        <p class="card-text">
+                                            <span class="badge bg-primary">우수</span><br>
+                                            <small class="text-muted">지난 주 대비: <strong>+2.1%</strong></small>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 차트 영역 -->
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-chart-line me-2"></i>일별 신고 처리 현황
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <canvas id="dailyReportsChart" height="300"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-pie-chart me-2"></i>신고 유형별 분포
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <canvas id="reportTypeChart" height="300"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 신고 목록 탭 -->
+                    <div class="tab-pane fade" id="reports">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-list me-2"></i>신고 목록
+                                </h5>
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="listView">
+                                        <i class="fas fa-list"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm active" id="cardView">
+                                        <i class="fas fa-th-large"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <!-- 검색 및 정렬 -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <div class="input-group">
+                                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                            <input type="text" class="form-control" placeholder="신고 내용 검색..." id="searchInput">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <select class="form-select" id="aiResultFilter">
+                                            <option value="all">전체</option>
+                                            <option value="일치">일치</option>
+                                            <option value="부분일치">부분일치</option>
+                                            <option value="불일치">불일치</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <select class="form-select" id="partialMatchSubFilter" style="display: none;">
+                                            <option value="all">전체</option>
+                                            <option value="pending">검토 필요</option>
+                                            <option value="reviewed">검토 완료</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <select class="form-select" id="sortBy">
+                                            <option value="date">신고일시 순</option>
+                                            <option value="status">상태 순</option>
+                                            <option value="type">유형 순</option>
+                                            <option value="priority">우선순위 순</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <select class="form-select" id="itemsPerPage">
+                                            <option value="10">10개씩 보기</option>
+                                            <option value="25" selected>25개씩 보기</option>
+                                            <option value="50">50개씩 보기</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- 신고 목록 (카드 뷰) -->
+                                <div id="reportsContainer">
+                                    <!-- 동적으로 생성될 신고 카드들 -->
+                                </div>
+
+                                <!-- 페이지네이션 -->
+                                <nav aria-label="신고 목록 페이지네이션" class="mt-4">
+                                    <ul class="pagination justify-content-center" id="pagination">
+                                        <!-- 동적으로 생성될 페이지네이션 -->
+                                    </ul>
+                                </nav>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 통계 분석 탭 -->
+                    <div class="tab-pane fade" id="analytics">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-chart-bar me-2"></i>월별 신고 트렌드
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <canvas id="monthlyTrendChart" height="300"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-clock me-2"></i>처리 시간 분석
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <canvas id="processingTimeChart" height="300"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 신고 상세 모달 -->
+    <div class="modal fade" id="reportDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-file-alt me-2"></i>신고 상세 정보
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- 동적으로 채워질 신고 상세 내용 -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                    <button type="button" class="btn btn-success" id="approveReport">승인</button>
+                    <button type="button" class="btn btn-danger" id="rejectReport">반려</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-container">
+            <p>&copy; 2025 Community Admin Frontend. All rights reserved.</p>
+            <p class="footer-info">FastAPI + Jinja2 기반 커뮤니티 관리 대시보드</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', path='/js/match_bootstrap_replacement.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/match_admin_script.js') }}"></script>
+</body>
+</html>
