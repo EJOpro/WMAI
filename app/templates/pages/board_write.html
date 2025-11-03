@@ -258,6 +258,9 @@
                             location.href = `/board/${data.post_id}`;
                         }
                     }, 1000);
+                } else if (data.blocked) {
+                    // 차단된 경우
+                    showAlert(data.message || '작성이 차단되었습니다', 'error');
                 } else {
                     showAlert(data.detail || (isEditMode ? '수정에 실패했습니다' : '작성에 실패했습니다'));
                 }

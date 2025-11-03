@@ -4,13 +4,106 @@
 """
 from fastapi import APIRouter, Request, HTTPException, status
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import datetime
 from app.auth import get_current_user
 from app.database import execute_query, get_db_connection
 import pymysql
 
 router = APIRouter(tags=["board"])
+
+# Ethics 분석 관련 import
+try:
+    from ethics.ethics_hybrid_predictor import HybridEthicsAnalyzer
+    from ethics.ethics_db_logger import db_logger
+    ETHICS_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] Ethics 모듈 import 실패: {e}")
+    ETHICS_AVAILABLE = False
+
+# 전역 analyzer 인스턴스
+ethics_analyzer = None
+
+
+def get_ethics_analyzer():
+    """Ethics analyzer 싱글톤 패턴"""
+    global ethics_analyzer
+    if not ETHICS_AVAILABLE:
+        return None
+    
+    if ethics_analyzer is None:
+        try:
+            ethics_analyzer = HybridEthicsAnalyzer()
+            print("[INFO] Ethics analyzer 초기화 완료")
+        except Exception as e:
+            print(f"[ERROR] Ethics analyzer 초기화 실패: {e}")
+            return None
+    return ethics_analyzer
+
+
+def should_block_content(result: dict) -> Tuple[bool, str]:
+    """
+    분석 결과를 바탕으로 차단 여부 결정
+    
+    Returns:
+        (차단여부, 차단사유)
+    """
+    final_score = result.get('final_score', 0)
+    final_confidence = result.get('final_confidence', 0)
+    spam_score = result.get('spam_score', 0)
+    spam_confidence = result.get('spam_confidence', 0)
+    
+    # 차단 기준 1: 비윤리 점수 >= 80 AND 신뢰도 >= 80
+    if final_score >= 80 and final_confidence >= 80:
+        return True, f"비윤리적 내용 감지 (점수: {final_score:.1f}, 신뢰도: {final_confidence:.1f})"
+    
+    # 차단 기준 2: 스팸 점수 >= 70 AND 신뢰도 >= 70
+    if spam_score >= 70 and spam_confidence >= 70:
+        return True, f"스팸 내용 감지 (점수: {spam_score:.1f}, 신뢰도: {spam_confidence:.1f})"
+    
+    return False, ""
+
+
+async def analyze_and_log_content(text: str, ip_address: str = None) -> Tuple[str, dict, str]:
+    """
+    콘텐츠 분석 및 로그 저장
+    
+    Returns:
+        (status, result, block_reason)
+    """
+    try:
+        analyzer = get_ethics_analyzer()
+        if analyzer is None:
+            print("[WARN] Ethics analyzer 없음 - 분석 건너뜀")
+            return 'exposed', None, ""
+        
+        # 분석 실행
+        result = analyzer.analyze(text)
+        
+        # 차단 여부 결정
+        should_block, block_reason = should_block_content(result)
+        status = 'blocked' if should_block else 'exposed'
+        
+        # 로그 저장 (ethics_logs 테이블)
+        try:
+            db_logger.log_analysis(
+                text=text,
+                score=result['final_score'],
+                confidence=result['final_confidence'],
+                spam=result['spam_score'],
+                spam_confidence=result['spam_confidence'],
+                types=result.get('types', []),
+                ip_address=ip_address
+            )
+            print(f"[INFO] Ethics 분석 완료 - status: {status}, 비윤리: {result['final_score']:.1f}, 스팸: {result['spam_score']:.1f}")
+        except Exception as log_error:
+            print(f"[WARN] 로그 저장 실패: {log_error}")
+        
+        return status, result, block_reason
+        
+    except Exception as e:
+        print(f"[ERROR] Ethics 분석 실패: {e}")
+        return 'exposed', None, ""  # 분석 실패 시 일단 노출
 
 
 class PostCreate(BaseModel):
@@ -227,11 +320,25 @@ async def create_post(request: Request, data: PostCreate):
             detail="내용은 5자 이상이어야 합니다"
         )
     
-    # 게시글 생성
+    # 비윤리/스팸 자동 분석
+    content_text = f"{data.title}\n{data.content}"
+    client_ip = request.client.host if request.client else None
+    content_status, analysis_result, block_reason = await analyze_and_log_content(content_text, client_ip)
+    
+    # 게시글 생성 (분석된 status로 저장)
     post_id = execute_query("""
         INSERT INTO board (user_id, title, content, category, status)
-        VALUES (%s, %s, %s, %s, 'exposed')
-    """, (user['user_id'], data.title, data.content, data.category))
+        VALUES (%s, %s, %s, %s, %s)
+    """, (user['user_id'], data.title, data.content, data.category, content_status))
+    
+    # 응답 메시지
+    if content_status == 'blocked':
+        return {
+            'success': False,
+            'message': f'게시글이 자동 차단되었습니다: {block_reason}',
+            'blocked': True,
+            'reason': block_reason
+        }
     
     return {
         'success': True,
@@ -445,11 +552,24 @@ async def create_comment(request: Request, post_id: int, data: CommentCreate):
                 detail="부모 댓글을 찾을 수 없습니다"
             )
     
-    # 댓글 생성
+    # 비윤리/스팸 자동 분석
+    client_ip = request.client.host if request.client else None
+    content_status, analysis_result, block_reason = await analyze_and_log_content(data.content, client_ip)
+    
+    # 댓글 생성 (분석된 status로 저장)
     comment_id = execute_query("""
         INSERT INTO comment (board_id, user_id, content, parent_id, status)
-        VALUES (%s, %s, %s, %s, 'exposed')
-    """, (post_id, user['user_id'], data.content, data.parent_id))
+        VALUES (%s, %s, %s, %s, %s)
+    """, (post_id, user['user_id'], data.content, data.parent_id, content_status))
+    
+    # 응답 메시지
+    if content_status == 'blocked':
+        return {
+            'success': False,
+            'message': f'댓글이 자동 차단되었습니다: {block_reason}',
+            'blocked': True,
+            'reason': block_reason
+        }
     
     return {
         'success': True,
