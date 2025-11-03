@@ -14,13 +14,25 @@
             padding: 0 20px;
         }
         .back-link {
-            display: inline-block;
-            color: #6B7280;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            background: white;
+            color: #374151;
             text-decoration: none;
             margin-bottom: 20px;
+            border-radius: 8px;
+            border: 1px solid #E5E7EB;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
         .back-link:hover {
-            color: #374151;
+            background: #F9FAFB;
+            border-color: #D1D5DB;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .post-card {
             background: white;
@@ -115,7 +127,9 @@
             margin-bottom: 20px;
         }
         .comment-form {
-            margin-bottom: 30px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #E5E7EB;
         }
         .comment-form textarea {
             width: 100%;
@@ -153,23 +167,23 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
         .comment-author {
             font-weight: 600;
             color: #374151;
-            font-size: 14px;
+            font-size: 16px;
         }
         .comment-date {
             color: #9CA3AF;
-            font-size: 13px;
+            font-size: 14px;
         }
         .comment-content {
             color: #4B5563;
-            font-size: 14px;
+            font-size: 16px;
             line-height: 1.6;
-            margin-bottom: 8px;
-            white-space: pre-wrap;
+            margin-bottom: 6px;
+            /* white-space: pre-wrap; */
             word-break: break-word;
         }
         .comment-actions {
@@ -194,15 +208,15 @@
             border-left: 2px solid #E5E7EB;
         }
         .reply-item {
-            padding: 12px 0;
+            padding: 8px 0;
             border-bottom: 1px solid #F3F4F6;
         }
         .reply-item:last-child {
             border-bottom: none;
         }
         .loading {
+            padding:0;
             text-align: center;
-            padding: 40px;
             color: #6B7280;
         }
         .edit-form {
@@ -220,7 +234,7 @@
         }
         .btn-sm {
             padding: 6px 12px;
-            font-size: 13px;
+            font-size: 15px;
         }
         .alert {
             padding: 12px;
@@ -249,9 +263,9 @@
             <div class="comments-section">
                 <h3 class="comments-header">댓글 <span id="commentCount">0</span></h3>
 
-                <div id="commentFormContainer"></div>
-
                 <div class="comment-list" id="commentList"></div>
+
+                <div id="commentFormContainer"></div>
             </div>
         </div>
     </div>

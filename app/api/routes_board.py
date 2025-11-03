@@ -51,14 +51,14 @@ async def get_posts(
     """
     offset = (page - 1) * limit
     
-    # 기본 쿼리
+    # 기본 쿼리 (LEFT JOIN으로 탈퇴한 사용자 처리)
     query = """
         SELECT 
             b.id, b.title, b.content, b.category, b.status,
             b.like_count, b.view_count, b.created_at, b.updated_at,
-            u.id as user_id, u.username
+            u.id as user_id, COALESCE(u.username, '탈퇴한 사용자') as username
         FROM board b
-        JOIN users u ON b.user_id = u.id
+        LEFT JOIN users u ON b.user_id = u.id
         WHERE b.status = 'exposed'
     """
     params = []
@@ -123,14 +123,14 @@ async def get_post(request: Request, post_id: int):
         (post_id,)
     )
     
-    # 게시글 조회
+    # 게시글 조회 (LEFT JOIN으로 탈퇴한 사용자 처리)
     post = execute_query("""
         SELECT 
             b.id, b.title, b.content, b.category, b.status,
             b.like_count, b.view_count, b.created_at, b.updated_at,
-            u.id as user_id, u.username
+            u.id as user_id, COALESCE(u.username, '탈퇴한 사용자') as username
         FROM board b
-        JOIN users u ON b.user_id = u.id
+        LEFT JOIN users u ON b.user_id = u.id
         WHERE b.id = %s AND b.status = 'exposed'
     """, (post_id,), fetch_one=True)
     
@@ -140,14 +140,14 @@ async def get_post(request: Request, post_id: int):
             detail="게시글을 찾을 수 없습니다"
         )
     
-    # 댓글 조회
+    # 댓글 조회 (LEFT JOIN으로 탈퇴한 사용자 처리)
     comments = execute_query("""
         SELECT 
             c.id, c.content, c.parent_id, c.status,
             c.created_at, c.updated_at,
-            u.id as user_id, u.username
+            u.id as user_id, COALESCE(u.username, '탈퇴한 사용자') as username
         FROM comment c
-        JOIN users u ON c.user_id = u.id
+        LEFT JOIN users u ON c.user_id = u.id
         WHERE c.board_id = %s AND c.status = 'exposed'
         ORDER BY c.parent_id IS NULL DESC, c.parent_id, c.created_at
     """, (post_id,), fetch_all=True)
@@ -177,9 +177,9 @@ async def get_post(request: Request, post_id: int):
             if comment['parent_id'] in comment_map:
                 comment_map[comment['parent_id']]['replies'].append(comment_obj)
     
-    # 현재 사용자 확인
+    # 현재 사용자 확인 (user_id가 NULL이면 탈퇴한 사용자이므로 is_author는 False)
     current_user = get_current_user(request)
-    is_author = current_user and current_user['user_id'] == post['user_id']
+    is_author = current_user and post['user_id'] and current_user['user_id'] == post['user_id']
     
     return {
         'success': True,
