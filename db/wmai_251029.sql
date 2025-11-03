@@ -1,7 +1,7 @@
 -- DB생성
-DROP DATABASE IF EXISTS `wmai`;
-CREATE DATABASE `wmai` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE `wmai`;
+DROP DATABASE IF EXISTS `wmai_db`;
+CREATE DATABASE `wmai_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `wmai_db`;
 
 -- 1) 유저
 CREATE TABLE users (
