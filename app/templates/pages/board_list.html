@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>게시판 - Community Admin</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <style>
+        body { background-color: #F9FAFB; }
+        .board-container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        .board-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        .board-header h1 {
+            font-size: 32px;
+            color: #1F2937;
+            margin: 0;
+        }
+        .btn-write {
+            padding: 12px 24px;
+            background: #3B82F6;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .btn-write:hover {
+            background: #2563EB;
+        }
+        .category-tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #E5E7EB;
+            padding-bottom: 0;
+        }
+        .category-tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: #6B7280;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+        .category-tab.active {
+            color: #3B82F6;
+            border-bottom-color: #3B82F6;
+        }
+        .category-tab:hover {
+            color: #3B82F6;
+        }
+        .post-list {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .post-item {
+            padding: 20px 24px;
+            border-bottom: 1px solid #E5E7EB;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .post-item:hover {
+            background: #F9FAFB;
+        }
+        .post-item:last-child {
+            border-bottom: none;
+        }
+        .post-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 8px;
+        }
+        .post-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1F2937;
+            margin: 0;
+        }
+        .post-category {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #DBEAFE;
+            color: #1E40AF;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 12px;
+        }
+        .post-content {
+            color: #6B7280;
+            margin: 8px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .post-meta {
+            display: flex;
+            gap: 16px;
+            color: #9CA3AF;
+            font-size: 13px;
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 30px;
+        }
+        .page-btn {
+            padding: 8px 12px;
+            border: 1px solid #E5E7EB;
+            background: white;
+            color: #374151;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .page-btn:hover:not(:disabled) {
+            background: #F9FAFB;
+        }
+        .page-btn.active {
+            background: #3B82F6;
+            color: white;
+            border-color: #3B82F6;
+        }
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .no-posts {
+            padding: 60px 20px;
+            text-align: center;
+            color: #9CA3AF;
+        }
+        .loading {
+            padding: 60px 20px;
+            text-align: center;
+            color: #6B7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="board-container">
+        <div class="board-header">
+            <h1>게시판</h1>
+            <div>
+                <a href="/" style="margin-right: 12px; color: #6B7280; text-decoration: none;">홈으로</a>
+                <a href="/board/write" class="btn-write" id="writeBtn" style="display: none;">글쓰기</a>
+            </div>
+        </div>
+
+        <div class="category-tabs" id="categoryTabs">
+            <button class="category-tab active" data-category="">전체</button>
+            <button class="category-tab" data-category="free">자유게시판</button>
+            <button class="category-tab" data-category="notice">공지사항</button>
+            <button class="category-tab" data-category="qna">질문답변</button>
+            <button class="category-tab" data-category="review">후기</button>
+            <button class="category-tab" data-category="tips">팁/노하우</button>
+        </div>
+
+        <div class="post-list" id="postList">
+            <div class="loading">게시글을 불러오는 중...</div>
+        </div>
+
+        <div class="pagination" id="pagination"></div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let currentCategory = '';
+        let userInfo = null;
+
+        // 사용자 정보 확인
+        async function checkUser() {
+            try {
+                const response = await fetch('/api/auth/me');
+                const data = await response.json();
+                if (data.authenticated) {
+                    userInfo = data.user;
+                    document.getElementById('writeBtn').style.display = 'inline-block';
+                }
+            } catch (error) {
+                console.error('Failed to check user:', error);
+            }
+        }
+
+        // 게시글 목록 로드
+        async function loadPosts(page = 1, category = '') {
+            try {
+                let url = `/api/board/posts?page=${page}&limit=20`;
+                if (category) {
+                    url += `&category=${category}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.success) {
+                    displayPosts(data.posts);
+                    displayPagination(data.pagination);
+                    currentPage = page;
+                    currentCategory = category;
+                } else {
+                    document.getElementById('postList').innerHTML = '<div class="no-posts">게시글을 불러올 수 없습니다</div>';
+                }
+            } catch (error) {
+                console.error('Failed to load posts:', error);
+                document.getElementById('postList').innerHTML = '<div class="no-posts">게시글을 불러오는 중 오류가 발생했습니다</div>';
+            }
+        }
+
+        // 게시글 표시
+        function displayPosts(posts) {
+            const postList = document.getElementById('postList');
+
+            if (!posts || posts.length === 0) {
+                postList.innerHTML = '<div class="no-posts">게시글이 없습니다</div>';
+                return;
+            }
+
+            const html = posts.map(post => {
+                const categoryLabels = {
+                    'free': '자유게시판',
+                    'notice': '공지사항',
+                    'qna': '질문답변',
+                    'review': '후기',
+                    'tips': '팁/노하우'
+                };
+                
+                const date = new Date(post.created_at);
+                const dateStr = date.toLocaleDateString('ko-KR');
+                
+                return `
+                    <div class="post-item" onclick="location.href='/board/${post.id}'">
+                        <div class="post-header">
+                            <div>
+                                <h3 class="post-title">
+                                    ${post.title}
+                                    <span class="post-category">${categoryLabels[post.category] || post.category}</span>
+                                </h3>
+                            </div>
+                        </div>
+                        <div class="post-content">${post.content}</div>
+                        <div class="post-meta">
+                            <span>👤 ${post.author.username}</span>
+                            <span>📅 ${dateStr}</span>
+                            <span>👁️ ${post.view_count}</span>
+                            <span>❤️ ${post.like_count}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            postList.innerHTML = html;
+        }
+
+        // 페이지네이션 표시
+        function displayPagination(pagination) {
+            const paginationDiv = document.getElementById('pagination');
+
+            if (pagination.total_pages <= 1) {
+                paginationDiv.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+
+            // 이전 버튼
+            html += `<button class="page-btn" ${pagination.page <= 1 ? 'disabled' : ''} onclick="loadPosts(${pagination.page - 1}, '${currentCategory}')">이전</button>`;
+
+            // 페이지 번호
+            const startPage = Math.max(1, pagination.page - 2);
+            const endPage = Math.min(pagination.total_pages, pagination.page + 2);
+
+            if (startPage > 1) {
+                html += `<button class="page-btn" onclick="loadPosts(1, '${currentCategory}')">1</button>`;
+                if (startPage > 2) {
+                    html += `<span style="padding: 8px;">...</span>`;
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="page-btn ${i === pagination.page ? 'active' : ''}" onclick="loadPosts(${i}, '${currentCategory}')">${i}</button>`;
+            }
+
+            if (endPage < pagination.total_pages) {
+                if (endPage < pagination.total_pages - 1) {
+                    html += `<span style="padding: 8px;">...</span>`;
+                }
+                html += `<button class="page-btn" onclick="loadPosts(${pagination.total_pages}, '${currentCategory}')">${pagination.total_pages}</button>`;
+            }
+
+            // 다음 버튼
+            html += `<button class="page-btn" ${pagination.page >= pagination.total_pages ? 'disabled' : ''} onclick="loadPosts(${pagination.page + 1}, '${currentCategory}')">다음</button>`;
+
+            paginationDiv.innerHTML = html;
+        }
+
+        // 카테고리 탭 이벤트
+        document.getElementById('categoryTabs').addEventListener('click', (e) => {
+            if (e.target.classList.contains('category-tab')) {
+                document.querySelectorAll('.category-tab').forEach(tab => tab.classList.remove('active'));
+                e.target.classList.add('active');
+                const category = e.target.dataset.category;
+                loadPosts(1, category);
+            }
+        });
+
+        // 초기화
+        checkUser();
+        loadPosts();
+    </script>
+</body>
+</html>
+
