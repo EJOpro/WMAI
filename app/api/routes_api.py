@@ -527,6 +527,19 @@ class EthicsAnalyzeRequest(BaseModel):
             }
         }
 
+class DetailedAnalysis(BaseModel):
+    """상세 분석 정보"""
+    bert_score: float
+    bert_confidence: float
+    llm_score: float
+    llm_confidence: float
+    llm_spam_score: float
+    rule_spam_score: float
+    base_score: float
+    profanity_boost: float
+    weights: dict
+    spam_weights: dict
+
 class EthicsAnalyzeResponse(BaseModel):
     """Ethics 분석 응답 모델"""
     text: str
@@ -535,6 +548,7 @@ class EthicsAnalyzeResponse(BaseModel):
     spam: float = Field(..., description="스팸 지수 (0-100)")
     spam_confidence: float = Field(..., description="스팸 신뢰도 (0-100)")
     types: List[str] = Field(..., description="분석 유형 목록")
+    detailed: DetailedAnalysis = Field(..., description="상세 분석 정보")
 
 
 def simplify_result(result: dict) -> dict:
@@ -545,7 +559,26 @@ def simplify_result(result: dict) -> dict:
         'confidence': round(result['final_confidence'], 1),
         'spam': round(result['spam_score'], 1),
         'spam_confidence': round(result['spam_confidence'], 1),
-        'types': result['types']
+        'types': result['types'],
+        # 상세 정보 추가
+        'detailed': {
+            'bert_score': round(result['bert_score'], 1),
+            'bert_confidence': round(result['bert_confidence'], 1),
+            'llm_score': round(result['llm_score'], 1),
+            'llm_confidence': round(result['llm_confidence'], 1),
+            'llm_spam_score': round(result['llm_spam_score'], 1),
+            'rule_spam_score': round(result['rule_spam_score'], 1),
+            'base_score': round(result['base_score'], 1),
+            'profanity_boost': round(result['profanity_boost'], 1),
+            'weights': {
+                'bert': round(result['weights']['bert'], 2),
+                'llm': round(result['weights']['llm'], 2)
+            },
+            'spam_weights': {
+                'llm': 0.6 if result['rule_spam_score'] < 80 else 0.3,
+                'rule': 0.4 if result['rule_spam_score'] < 80 else 0.7
+            }
+        }
     }
 
 
