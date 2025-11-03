@@ -34,6 +34,10 @@
                 <i class="fas fa-search"></i>
                 분석하기
             </button>
+            <button id="detailBtn" class="btn btn-secondary" style="display:none;">
+                <i class="fas fa-info-circle"></i>
+                상세분석
+            </button>
         </div>
         
         <div id="errorMessage" class="error-message"></div>
@@ -75,6 +79,57 @@
         
         <div id="recommendation" class="recommendation">
             <!-- 추천 사항이 여기에 동적으로 추가됩니다 -->
+        </div>
+        
+        <!-- 상세 분석 섹션 -->
+        <div id="detailSection" class="detail-analysis-section" style="display:none;">
+            <div class="detail-header">
+                <h4><i class="fas fa-microscope"></i> 상세 분석 결과</h4>
+            </div>
+            
+            <div class="detail-content">
+                <!-- 비윤리 점수 상세 -->
+                <div class="detail-card">
+                    <h5>비윤리 점수 계산</h5>
+                    <div class="detail-row">
+                        <span>BERT 모델 점수 (신뢰도):</span>
+                        <span><span id="detailBertScore">-</span> <small class="confidence-text">(<span id="detailBertConf">-</span>)</small></span>
+                    </div>
+                    <div class="detail-row">
+                        <span>LLM 모델 점수 (신뢰도):</span>
+                        <span><span id="detailLlmScore">-</span> <small class="confidence-text">(<span id="detailLlmConf">-</span>)</small></span>
+                    </div>
+                    <div class="detail-row">
+                        <span>욕설 부스트:</span>
+                        <span id="detailProfanityBoost">-</span>
+                    </div>
+                    <div class="detail-formula">
+                        계산식: (BERT × <span id="detailBertWeight">-</span>) + (LLM × <span id="detailLlmWeight">-</span>) + 욕설부스트
+                    </div>
+                    <div class="detail-result">
+                        = <span id="detailBaseScore">-</span> + <span id="detailProfanityBoost2">-</span> = <span id="detailFinalScore">-</span>
+                    </div>
+                </div>
+                
+                <!-- 스팸 점수 상세 -->
+                <div class="detail-card">
+                    <h5>스팸 점수 계산</h5>
+                    <div class="detail-row">
+                        <span>LLM 스팸 점수:</span>
+                        <span id="detailLlmSpam">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>규칙 기반 점수:</span>
+                        <span id="detailRuleSpam">-</span>
+                    </div>
+                    <div class="detail-formula">
+                        계산식: (LLM × <span id="detailSpamLlmWeight">-</span>) + (규칙 × <span id="detailSpamRuleWeight">-</span>)
+                    </div>
+                    <div class="detail-result">
+                        = <span id="detailFinalSpam">-</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

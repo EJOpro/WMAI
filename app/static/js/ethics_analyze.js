@@ -4,12 +4,16 @@
     
     // API 설정
     const API_BASE_URL = '';  // 같은 도메인 사용
+    
+    // 전역 변수 (스코프 내)
+    let detailedAnalysisData = null;
 
     // DOM 요소
     const elements = {
     textInput: document.getElementById('textInput'),
     charCount: document.getElementById('charCount'),
     analyzeBtn: document.getElementById('analyzeBtn'),
+    detailBtn: document.getElementById('detailBtn'),
     loadingSpinner: document.getElementById('loadingSpinner'),
     resultSection: document.getElementById('resultSection'),
     errorMessage: document.getElementById('errorMessage'),
@@ -19,7 +23,23 @@
     scoreValue: document.getElementById('scoreValue'),
     spamValue: document.getElementById('spamValue'),
     typesContainer: document.getElementById('typesContainer'),
-    recommendation: document.getElementById('recommendation')
+    recommendation: document.getElementById('recommendation'),
+    detailSection: document.getElementById('detailSection'),
+    detailBertScore: document.getElementById('detailBertScore'),
+    detailBertConf: document.getElementById('detailBertConf'),
+    detailLlmScore: document.getElementById('detailLlmScore'),
+    detailLlmConf: document.getElementById('detailLlmConf'),
+    detailProfanityBoost: document.getElementById('detailProfanityBoost'),
+    detailBertWeight: document.getElementById('detailBertWeight'),
+    detailLlmWeight: document.getElementById('detailLlmWeight'),
+    detailBaseScore: document.getElementById('detailBaseScore'),
+    detailProfanityBoost2: document.getElementById('detailProfanityBoost2'),
+    detailFinalScore: document.getElementById('detailFinalScore'),
+    detailLlmSpam: document.getElementById('detailLlmSpam'),
+    detailRuleSpam: document.getElementById('detailRuleSpam'),
+    detailSpamLlmWeight: document.getElementById('detailSpamLlmWeight'),
+    detailSpamRuleWeight: document.getElementById('detailSpamRuleWeight'),
+    detailFinalSpam: document.getElementById('detailFinalSpam')
 };
 
 // 유틸리티 함수
@@ -211,6 +231,23 @@ const analyzer = {
         elements.typesContainer.innerHTML = utils.createTypeTags(result.types);
         elements.recommendation.innerHTML = utils.getRecommendation(score, spam, result.types);
         
+        // 상세 분석 데이터 저장
+        detailedAnalysisData = result.detailed;
+        console.log('[분석 결과] 상세 데이터 저장:', detailedAnalysisData);
+        
+        // 상세 분석 버튼 표시
+        if (elements.detailBtn) {
+            elements.detailBtn.style.display = 'inline-block';
+            console.log('[분석 결과] 상세분석 버튼 표시됨');
+        } else {
+            console.error('[분석 결과] 상세분석 버튼 요소를 찾을 수 없습니다');
+        }
+        
+        // 상세 섹션 숨기기 (새 분석 시)
+        if (elements.detailSection) {
+            elements.detailSection.style.display = 'none';
+        }
+        
         elements.resultSection.classList.add('show');
         utils.hideError();
         
@@ -218,6 +255,60 @@ const analyzer = {
             behavior: 'smooth', 
             block: 'start' 
         });
+    },
+    
+    showDetailedAnalysis() {
+        console.log('[상세분석] 버튼 클릭됨');
+        
+        if (!detailedAnalysisData) {
+            console.error('[상세분석] detailedData가 없습니다');
+            alert('상세 분석 데이터를 찾을 수 없습니다. 먼저 분석을 실행해주세요.');
+            return;
+        }
+        
+        console.log('[상세분석] 데이터:', detailedAnalysisData);
+        
+        const d = detailedAnalysisData;
+        
+        try {
+            // 비윤리 점수 상세
+            elements.detailBertScore.textContent = d.bert_score;
+            elements.detailBertConf.textContent = d.bert_confidence;
+            elements.detailLlmScore.textContent = d.llm_score;
+            elements.detailLlmConf.textContent = d.llm_confidence;
+            elements.detailProfanityBoost.textContent = d.profanity_boost;
+            elements.detailBertWeight.textContent = d.weights.bert;
+            elements.detailLlmWeight.textContent = d.weights.llm;
+            elements.detailBaseScore.textContent = d.base_score;
+            elements.detailProfanityBoost2.textContent = d.profanity_boost;
+            elements.detailFinalScore.textContent = (d.base_score + d.profanity_boost).toFixed(1);
+            
+            // 스팸 점수 상세
+            elements.detailLlmSpam.textContent = d.llm_spam_score;
+            elements.detailRuleSpam.textContent = d.rule_spam_score;
+            elements.detailSpamLlmWeight.textContent = d.spam_weights.llm;
+            elements.detailSpamRuleWeight.textContent = d.spam_weights.rule;
+            
+            const finalSpam = (d.llm_spam_score * d.spam_weights.llm + d.rule_spam_score * d.spam_weights.rule).toFixed(1);
+            elements.detailFinalSpam.textContent = finalSpam;
+            
+            // 상세 섹션 표시
+            elements.detailSection.style.display = 'block';
+            
+            console.log('[상세분석] 상세 섹션 표시 완료');
+            
+            // 상세 섹션으로 스크롤
+            setTimeout(() => {
+                elements.detailSection.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'start' 
+                });
+            }, 100);
+            
+        } catch (error) {
+            console.error('[상세분석] 오류 발생:', error);
+            alert('상세 분석 표시 중 오류가 발생했습니다: ' + error.message);
+        }
     }
 };
 
@@ -233,6 +324,11 @@ const eventListeners = {
             analyzer.analyze();
         });
         
+        elements.detailBtn.addEventListener('click', () => {
+            console.log('[이벤트] 상세분석 버튼 클릭');
+            analyzer.showDetailedAnalysis();
+        });
+        
         elements.textInput.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'Enter') {
                 analyzer.analyze();
@@ -246,8 +342,23 @@ const eventListeners = {
 // 초기화
 const app = {
     init() {
+        console.log('[초기화] 앱 초기화 시작');
+        
+        // DOM 요소 확인
+        console.log('[초기화] detailBtn 요소:', elements.detailBtn);
+        console.log('[초기화] detailSection 요소:', elements.detailSection);
+        
+        if (!elements.detailBtn) {
+            console.error('[초기화] 경고: detailBtn 요소를 찾을 수 없습니다');
+        }
+        if (!elements.detailSection) {
+            console.error('[초기화] 경고: detailSection 요소를 찾을 수 없습니다');
+        }
+        
         eventListeners.init();
         elements.textInput.focus();
+        
+        console.log('[초기화] 앱 초기화 완료');
     }
 };
 
