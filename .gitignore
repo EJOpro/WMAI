@@ -37,6 +37,10 @@ venv.bak/
 # Environment
 .env
 .env.local
+config.env
+match_config.env
+config.env.example
+match_config.env.example
 
 # OS
 .DS_Store
@@ -49,6 +53,7 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+match_reports_db.json
 
 # Static files (if generated)
 collected_static/
