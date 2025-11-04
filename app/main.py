@@ -75,14 +75,15 @@ except Exception as e:
 
 # 라우터 등록
 try:
-    from app.api import routes_public, routes_health, routes_api, routes_match, routes_auth, routes_board
+    from app.api import routes_public, routes_health, routes_api, routes_match, routes_auth, routes_board, routes_admin
     app.include_router(routes_public.router)
     app.include_router(routes_health.router)
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_match.router, prefix="/api")  # WMAA 신고 검증 API
     app.include_router(routes_auth.router, prefix="/api")  # 인증 API
     app.include_router(routes_board.router, prefix="/api")  # 게시판 API
-    print("[OK] 모든 라우터 등록 완료 (WMAA, Auth, Board 포함)")
+    app.include_router(routes_admin.router, prefix="/api")  # 관리자 API
+    print("[OK] 모든 라우터 등록 완료 (WMAA, Auth, Board, Admin 포함)")
 except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
     # 기본 라우트만 제공

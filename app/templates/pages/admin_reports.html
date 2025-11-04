@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>관리자 - 신고 관리</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #F9FAFB; margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        
+        /* 헤더 바 */
+        .header-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+        }
+        .header-bar .logo {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1F2937;
+            text-decoration: none;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-name {
+            color: #374151;
+            font-weight: 500;
+        }
+        .btn-header {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-login {
+            background: #3B82F6;
+            color: white;
+        }
+        .btn-logout {
+            background: #EF4444;
+            color: white;
+        }
+        
+        /* 메인 컨테이너 */
+        .admin-container {
+            max-width: 1400px;
+            margin: 100px auto 40px;
+            padding: 0 20px;
+        }
+        
+        .admin-header {
+            margin-bottom: 30px;
+        }
+        
+        .admin-header h1 {
+            font-size: 32px;
+            color: #1F2937;
+            margin: 0 0 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .admin-header p {
+            color: #6B7280;
+            margin: 0;
+        }
+        
+        /* 필터 */
+        .filters {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .filters select {
+            padding: 10px 15px;
+            border: 1px solid #D1D5DB;
+            border-radius: 8px;
+            background: white;
+            color: #374151;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        .filters button {
+            padding: 10px 20px;
+            background: #3B82F6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .filters button:hover {
+            background: #2563EB;
+        }
+        
+        /* 신고 테이블 */
+        .report-table {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .report-row {
+            border-bottom: 1px solid #E5E7EB;
+            padding: 20px;
+            transition: background 0.2s;
+        }
+        
+        .report-row:last-child {
+            border-bottom: none;
+        }
+        
+        .report-row:hover {
+            background: #F9FAFB;
+        }
+        
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+        
+        .report-info {
+            flex: 1;
+        }
+        
+        .report-id {
+            color: #6B7280;
+            font-size: 15px;
+            margin-bottom: 6px;
+        }
+        
+        .report-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1F2937;
+            margin-bottom: 8px;
+        }
+        
+        .report-content {
+            color: #6B7280;
+            font-size: 15px;
+            margin-bottom: 10px;
+            padding: 12px;
+            background: #F9FAFB;
+            border-radius: 6px;
+            border-left: 3px solid #E5E7EB;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .report-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: #6B7280;
+        }
+        
+        .report-actions {
+            display: flex;
+            gap: 8px;
+            align-items: start;
+        }
+        
+        /* 배지 */
+        .badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            display: inline-block;
+        }
+        
+        .badge-pending { background: #FEF3C7; color: #92400E; }
+        .badge-reviewing { background: #DBEAFE; color: #1E40AF; }
+        .badge-completed { background: #D1FAE5; color: #065F46; }
+        .badge-rejected { background: #FEE2E2; color: #991B1B; }
+        
+        .badge-board { background: #E0E7FF; color: #3730A3; }
+        .badge-comment { background: #FCE7F3; color: #831843; }
+        
+        /* 버튼 */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-approve {
+            background: #10B981;
+            color: white;
+        }
+        
+        .btn-approve:hover {
+            background: #059669;
+        }
+        
+        .btn-reject {
+            background: #6B7280;
+            color: white;
+        }
+        
+        .btn-reject:hover {
+            background: #4B5563;
+        }
+        
+        .btn-disabled {
+            background: #E5E7EB;
+            color: #9CA3AF;
+            cursor: not-allowed;
+        }
+        
+        /* 페이지네이션 */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 30px;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            border: 1px solid #D1D5DB;
+            background: white;
+            color: #374151;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #F9FAFB;
+        }
+        
+        .pagination button.active {
+            background: #3B82F6;
+            color: white;
+            border-color: #3B82F6;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* 빈 상태 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6B7280;
+        }
+        
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        /* 모달 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        
+        .modal-body {
+            margin-bottom: 20px;
+        }
+        
+        .modal-body textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 12px;
+            border: 1px solid #D1D5DB;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+        }
+        
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .btn-cancel {
+            background: #6B7280;
+            color: white;
+        }
+        
+        .btn-confirm {
+            background: #3B82F6;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <a href="/" class="logo">Community Admin</a>
+        <div class="user-info" id="userInfo">
+            <span id="loadingUser">로딩 중...</span>
+        </div>
+    </div>
+    
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1><i class="fas fa-shield-alt"></i> 신고 관리</h1>
+            <p>신고된 게시글과 댓글을 검토하고 처리합니다</p>
+        </div>
+        
+        <div class="filters">
+            <label style="color: #374151; font-weight: 500;">상태:</label>
+            <select id="statusFilter">
+                <option value="">모든 상태</option>
+                <option value="pending" selected>대기중</option>
+                <option value="completed">승인</option>
+                <option value="rejected">거부</option>
+            </select>
+            
+            <label style="color: #374151; font-weight: 500;">타입:</label>
+            <select id="typeFilter">
+                <option value="">모든 타입</option>
+                <option value="board">게시글</option>
+                <option value="comment">댓글</option>
+            </select>
+            
+            <button onclick="loadReports(1)"><i class="fas fa-search"></i> 조회</button>
+        </div>
+        
+        <div id="reportList" class="report-table">
+            <div style="padding: 40px; text-align: center; color: #6B7280;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 32px;"></i>
+                <p style="margin-top: 16px;">로딩 중...</p>
+            </div>
+        </div>
+        
+        <div id="pagination" class="pagination"></div>
+    </div>
+    
+    <!-- 처리 모달 -->
+    <div id="processModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalTitle">신고 처리</div>
+            <div class="modal-body">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151;">처리 사유 (선택)</label>
+                <textarea id="processNote" placeholder="처리 사유를 입력하세요 (선택)"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" onclick="closeModal()">취소</button>
+                <button class="btn btn-confirm" id="confirmBtn" onclick="confirmProcess()">확인</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentPage = 1;
+        let currentReportId = null;
+        let currentAction = null;
+        
+        // 사용자 정보 로드
+        async function loadUserInfo() {
+            try {
+                const response = await fetch('/api/auth/me');
+                const data = await response.json();
+                
+                const userInfoDiv = document.getElementById('userInfo');
+                
+                if (data.authenticated && data.user) {
+                    userInfoDiv.innerHTML = `
+                        <span class="user-name">${data.user.username}님</span>
+                        <button class="btn-header btn-logout" onclick="logout()">로그아웃</button>
+                    `;
+                } else {
+                    userInfoDiv.innerHTML = `
+                        <a href="/login" class="btn-header btn-login">로그인</a>
+                    `;
+                }
+            } catch (error) {
+                console.error('Failed to load user info:', error);
+            }
+        }
+        
+        // 로그아웃
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                location.href = '/';
+            } catch (error) {
+                console.error('Logout failed:', error);
+            }
+        }
+        
+        // 관리자 확인
+        async function checkAdmin() {
+            const response = await fetch('/api/admin/me');
+            const data = await response.json();
+            
+            if (!data.is_admin) {
+                alert('관리자 권한이 필요합니다');
+                location.href = '/';
+                return false;
+            }
+            return true;
+        }
+        
+        // 신고 목록 로드
+        async function loadReports(page = 1) {
+            const status = document.getElementById('statusFilter').value;
+            const type = document.getElementById('typeFilter').value;
+            
+            const params = new URLSearchParams({
+                page: page,
+                limit: 20
+            });
+            
+            if (status) params.append('status_filter', status);
+            if (type) params.append('type_filter', type);
+            
+            try {
+                const response = await fetch(`/api/admin/reports?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentPage = page;
+                    renderReports(data.reports);
+                    renderPagination(data.pagination);
+                } else {
+                    alert('신고 목록을 불러오는데 실패했습니다');
+                }
+            } catch (error) {
+                console.error('Failed to load reports:', error);
+                document.getElementById('reportList').innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>신고 목록을 불러오는데 실패했습니다</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // 신고 목록 렌더링
+        function renderReports(reports) {
+            const container = document.getElementById('reportList');
+            
+            if (!reports || reports.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>표시할 신고가 없습니다</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = reports.map(report => {
+                const statusBadge = `<span class="badge badge-${report.status}">${getStatusText(report.status)}</span>`;
+                const typeBadge = `<span class="badge badge-${report.report_type}">${report.report_type === 'board' ? '게시글' : '댓글'}</span>`;
+                
+                // 신고된 내용
+                let reportedContent = '';
+                if (report.report_type === 'board') {
+                    reportedContent = `<strong>${report.board_title || '(삭제된 게시글)'}</strong>`;
+                } else {
+                    reportedContent = report.comment_content || '(삭제된 댓글)';
+                }
+                
+                // 현재 상태
+                let contentStatus = '';
+                if (report.report_type === 'board' && report.board_status) {
+                    contentStatus = `<span style="margin-left:5px; font-size: 14px; color: ${report.board_status === 'blocked' ? '#DC2626' : '#059669'};">
+                        [${report.board_status === 'blocked' ? '차단됨' : '노출중'}]
+                    </span>`;
+                } else if (report.report_type === 'comment' && report.comment_status) {
+                    contentStatus = `<span style="margin-left:5px; font-size: 14px; color: ${report.comment_status === 'blocked' ? '#DC2626' : '#059669'};">
+                        [${report.comment_status === 'blocked' ? '차단됨' : '노출중'}]
+                    </span>`;
+                }
+                
+                // 액션 버튼
+                let actions = '';
+                if (report.status === 'pending' || report.status === 'reviewing') {
+                    actions = `
+                        <button class="btn btn-approve" onclick="openProcessModal(${report.id}, 'approve')">
+                            <i class="fas fa-check"></i> 승인
+                        </button>
+                        <button class="btn btn-reject" onclick="openProcessModal(${report.id}, 'reject')">
+                            <i class="fas fa-times"></i> 거부
+                        </button>
+                    `;
+                } else {
+                    actions = `<span class="badge badge-${report.status}">처리 완료</span>`;
+                }
+                
+                // 신고자의 상세 사유
+                let reporterDetail = '';
+                if (report.report_detail) {
+                    reporterDetail = `
+                        <div style="margin-top: 10px; padding: 12px; background: #FEF3C7; border-left: 3px solid #F59E0B; border-radius: 4px;">
+                            <strong style="color: #92400E; font-size: 14px;">📝 신고 상세 사유:</strong><br>
+                            <span style="color: #78350F; white-space: pre-wrap; font-size: 14px; margin-top: 4px; display: block;">${report.report_detail}</span>
+                        </div>
+                    `;
+                }
+                
+                // 처리 정보
+                let processInfo = '';
+                if (report.processed_date) {
+                    const processedDate = new Date(report.processed_date).toLocaleString('ko-KR');
+                    processInfo = `
+                        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #E5E7EB; font-size: 13px; color: #6B7280;">
+                            <strong>처리 시간:</strong> ${processedDate}
+                            ${report.processing_note ? `<br><strong>관리자 처리 사유:</strong> ${report.processing_note}` : ''}
+                        </div>
+                    `;
+                }
+                
+                return `
+                    <div class="report-row">
+                        <div class="report-header">
+                            <div class="report-info">
+                                <div class="report-id">신고 ID: #${report.id} | 신고자: ${report.reporter_name || '(알 수 없음)'} | ${new Date(report.created_at).toLocaleString('ko-KR')}</div>
+                                <div class="report-title">
+                                    ${typeBadge}
+                                    ${statusBadge}
+                                    <span style="margin-left: 8px; color: #DC2626; font-weight: 600;">${report.report_reason}</span>
+                                </div>
+                                <div class="report-content">
+                                    ${reportedContent} ${contentStatus}
+                                </div>
+                                ${reporterDetail}
+                                ${processInfo}
+                            </div>
+                            <div class="report-actions">
+                                ${actions}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // 상태 텍스트 변환
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': '대기중',
+                'reviewing': '검토중',
+                'completed': '승인',
+                'rejected': '거부'
+            };
+            return statusMap[status] || status;
+        }
+        
+        // 페이지네이션 렌더링
+        function renderPagination(pagination) {
+            const container = document.getElementById('pagination');
+            
+            if (pagination.total_pages <= 1) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            // 이전 버튼
+            html += `<button onclick="loadReports(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-chevron-left"></i>
+            </button>`;
+            
+            // 페이지 번호
+            for (let i = 1; i <= pagination.total_pages; i++) {
+                if (
+                    i === 1 || 
+                    i === pagination.total_pages || 
+                    (i >= currentPage - 2 && i <= currentPage + 2)
+                ) {
+                    html += `<button onclick="loadReports(${i})" class="${i === currentPage ? 'active' : ''}">${i}</button>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
+                    html += '<button disabled>...</button>';
+                }
+            }
+            
+            // 다음 버튼
+            html += `<button onclick="loadReports(${currentPage + 1})" ${currentPage === pagination.total_pages ? 'disabled' : ''}>
+                <i class="fas fa-chevron-right"></i>
+            </button>`;
+            
+            container.innerHTML = html;
+        }
+        
+        // 처리 모달 열기
+        function openProcessModal(reportId, action) {
+            currentReportId = reportId;
+            currentAction = action;
+            
+            const modal = document.getElementById('processModal');
+            const title = document.getElementById('modalTitle');
+            const confirmBtn = document.getElementById('confirmBtn');
+            
+            if (action === 'approve') {
+                title.textContent = '신고 승인';
+                confirmBtn.textContent = '승인';
+                confirmBtn.className = 'btn btn-approve';
+            } else {
+                title.textContent = '신고 거부';
+                confirmBtn.textContent = '거부';
+                confirmBtn.className = 'btn btn-reject';
+            }
+            
+            document.getElementById('processNote').value = '';
+            modal.classList.add('show');
+        }
+        
+        // 모달 닫기
+        function closeModal() {
+            document.getElementById('processModal').classList.remove('show');
+            currentReportId = null;
+            currentAction = null;
+        }
+        
+        // 신고 처리 확인
+        async function confirmProcess() {
+            if (!currentReportId || !currentAction) return;
+            
+            const note = document.getElementById('processNote').value.trim();
+            
+            try {
+                const response = await fetch(`/api/admin/reports/${currentReportId}/process`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        action: currentAction,
+                        note: note || null
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    closeModal();
+                    loadReports(currentPage);
+                } else {
+                    alert('처리 실패: ' + (data.detail || '알 수 없는 오류'));
+                }
+            } catch (error) {
+                console.error('Failed to process report:', error);
+                alert('처리 중 오류가 발생했습니다');
+            }
+        }
+        
+        // 모달 외부 클릭 시 닫기
+        document.getElementById('processModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+        
+        // 초기화
+        (async function() {
+            await loadUserInfo();
+            const isAdmin = await checkAdmin();
+            if (isAdmin) {
+                loadReports(1);
+            }
+        })();
+    </script>
+</body>
+</html>
+

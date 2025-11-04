@@ -8,9 +8,62 @@
     <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
     <style>
         body { background-color: #F9FAFB; }
+        .header-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+        }
+        .header-bar .logo {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1F2937;
+            text-decoration: none;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-name {
+            color: #374151;
+            font-weight: 500;
+        }
+        .btn-header {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-login {
+            background: #3B82F6;
+            color: white;
+        }
+        .btn-login:hover {
+            background: #2563EB;
+        }
+        .btn-logout {
+            background: #EF4444;
+            color: white;
+        }
+        .btn-logout:hover {
+            background: #DC2626;
+        }
         .write-container {
             max-width: 900px;
             margin: 40px auto;
+            margin-top: 100px;
             padding: 0 20px;
         }
         .write-header {
@@ -112,6 +165,13 @@
     </style>
 </head>
 <body>
+    <div class="header-bar">
+        <a href="/" class="logo">Community Admin</a>
+        <div class="user-info" id="userInfo">
+            <span id="loadingUser">로딩 중...</span>
+        </div>
+    </div>
+    
     <div class="write-container">
         <div class="write-header">
             <h1 id="pageTitle">글쓰기</h1>
@@ -233,7 +293,7 @@
             }
 
             submitBtn.disabled = true;
-            submitBtn.textContent = isEditMode ? '수정 중...' : '작성 중...';
+            submitBtn.textContent = isEditMode ? '수정 중...' : '비윤리/스팸 분석 중...';
 
             try {
                 const url = isEditMode ? `/api/board/posts/${postId}` : '/api/board/posts';
@@ -273,6 +333,58 @@
             }
         });
 
+        // 사용자 정보 로드
+        async function loadUserInfo() {
+            try {
+                const response = await fetch('/api/auth/me');
+                const data = await response.json();
+                
+                const userInfoDiv = document.getElementById('userInfo');
+                
+                if (data.authenticated && data.user) {
+                    // 관리자 여부 확인
+                    const adminResponse = await fetch('/api/admin/me');
+                    const adminData = await adminResponse.json();
+                    
+                    let adminButton = '';
+                    if (adminData.is_admin) {
+                        adminButton = `<a href="/admin/reports" class="btn-header" style="background: #8B5CF6; color: white;">⚙️ 관리자</a>`;
+                    }
+                    
+                    userInfoDiv.innerHTML = `
+                        ${adminButton}
+                        <span class="user-name">${data.user.username}님</span>
+                        <button class="btn-header btn-logout" onclick="logout()">로그아웃</button>
+                    `;
+                } else {
+                    userInfoDiv.innerHTML = `
+                        <a href="/login" class="btn-header btn-login">로그인</a>
+                        <a href="/register" class="btn-header btn-login" style="background: #6B7280;">회원가입</a>
+                    `;
+                }
+            } catch (error) {
+                console.error('Failed to load user info:', error);
+                document.getElementById('userInfo').innerHTML = `
+                    <a href="/login" class="btn-header btn-login">로그인</a>
+                `;
+            }
+        }
+
+        async function logout() {
+            try {
+                const response = await fetch('/api/auth/logout', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+                alert('로그아웃 중 오류가 발생했습니다');
+            }
+        }
+
         // 로그인 확인
         async function checkAuth() {
             try {
@@ -290,6 +402,7 @@
             }
         }
 
+        loadUserInfo();
         checkAuth();
     </script>
 </body>

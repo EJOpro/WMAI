@@ -117,3 +117,11 @@ async def board_detail(request: Request, post_id: int):
         {"request": request, "title": "게시글", "post_id": post_id}
     )
 
+@router.get("/admin/reports", response_class=HTMLResponse)
+async def admin_reports_page(request: Request):
+    """관리자 신고 관리 페이지"""
+    return templates.TemplateResponse(
+        "pages/admin_reports.html",
+        {"request": request, "title": "관리자 - 신고 관리"}
+    )
+

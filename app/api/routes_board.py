@@ -9,8 +9,13 @@ from datetime import datetime
 from app.auth import get_current_user
 from app.database import execute_query, get_db_connection
 import pymysql
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 router = APIRouter(tags=["board"])
+
+# 백그라운드 작업용 executor
+background_executor = ThreadPoolExecutor(max_workers=4)
 
 # Ethics 분석 관련 import
 try:
@@ -55,11 +60,11 @@ def should_block_content(result: dict) -> Tuple[bool, str]:
     
     # 차단 기준 1: 비윤리 점수 >= 80 AND 신뢰도 >= 80
     if final_score >= 80 and final_confidence >= 80:
-        return True, f"비윤리적 내용 감지 (점수: {final_score:.1f}, 신뢰도: {final_confidence:.1f})"
+        return True, "부적절한 내용이 포함되어 있습니다"
     
     # 차단 기준 2: 스팸 점수 >= 70 AND 신뢰도 >= 70
     if spam_score >= 70 and spam_confidence >= 70:
-        return True, f"스팸 내용 감지 (점수: {spam_score:.1f}, 신뢰도: {spam_confidence:.1f})"
+        return True, "스팸으로 의심되는 내용이 포함되어 있습니다"
     
     return False, ""
 
@@ -104,6 +109,102 @@ async def analyze_and_log_content(text: str, ip_address: str = None) -> Tuple[st
     except Exception as e:
         print(f"[ERROR] Ethics 분석 실패: {e}")
         return 'exposed', None, ""  # 분석 실패 시 일단 노출
+
+
+def analyze_and_update_post(post_id: int, text: str, ip_address: str = None):
+    """
+    백그라운드에서 게시글 분석 및 상태 업데이트
+    
+    Args:
+        post_id: 게시글 ID
+        text: 분석할 텍스트
+        ip_address: IP 주소
+    """
+    try:
+        analyzer = get_ethics_analyzer()
+        if analyzer is None:
+            print(f"[WARN] 게시글 {post_id} - Analyzer 없음, 백그라운드 분석 건너뜀")
+            return
+        
+        # 분석 실행
+        result = analyzer.analyze(text)
+        
+        # 차단 여부 결정
+        should_block, block_reason = should_block_content(result)
+        status = 'blocked' if should_block else 'exposed'
+        
+        # 게시글 상태 업데이트
+        execute_query(
+            "UPDATE board SET status = %s WHERE id = %s",
+            (status, post_id)
+        )
+        
+        # 로그 저장
+        try:
+            db_logger.log_analysis(
+                text=text,
+                score=result['final_score'],
+                confidence=result['final_confidence'],
+                spam=result['spam_score'],
+                spam_confidence=result['spam_confidence'],
+                types=result.get('types', []),
+                ip_address=ip_address
+            )
+        except Exception as log_error:
+            print(f"[WARN] 게시글 {post_id} - 로그 저장 실패: {log_error}")
+        
+        print(f"[INFO] 백그라운드 분석 완료 - post_id: {post_id}, status: {status}, 비윤리: {result['final_score']:.1f}, 스팸: {result['spam_score']:.1f}")
+        
+    except Exception as e:
+        print(f"[ERROR] 게시글 {post_id} - 백그라운드 분석 실패: {e}")
+
+
+def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = None):
+    """
+    백그라운드에서 댓글 분석 및 상태 업데이트
+    
+    Args:
+        comment_id: 댓글 ID
+        text: 분석할 텍스트
+        ip_address: IP 주소
+    """
+    try:
+        analyzer = get_ethics_analyzer()
+        if analyzer is None:
+            print(f"[WARN] 댓글 {comment_id} - Analyzer 없음, 백그라운드 분석 건너뜀")
+            return
+        
+        # 분석 실행
+        result = analyzer.analyze(text)
+        
+        # 차단 여부 결정
+        should_block, block_reason = should_block_content(result)
+        status = 'blocked' if should_block else 'exposed'
+        
+        # 댓글 상태 업데이트
+        execute_query(
+            "UPDATE comment SET status = %s WHERE id = %s",
+            (status, comment_id)
+        )
+        
+        # 로그 저장
+        try:
+            db_logger.log_analysis(
+                text=text,
+                score=result['final_score'],
+                confidence=result['final_confidence'],
+                spam=result['spam_score'],
+                spam_confidence=result['spam_confidence'],
+                types=result.get('types', []),
+                ip_address=ip_address
+            )
+        except Exception as log_error:
+            print(f"[WARN] 댓글 {comment_id} - 로그 저장 실패: {log_error}")
+        
+        print(f"[INFO] 백그라운드 분석 완료 - comment_id: {comment_id}, status: {status}, 비윤리: {result['final_score']:.1f}, 스팸: {result['spam_score']:.1f}")
+        
+    except Exception as e:
+        print(f"[ERROR] 댓글 {comment_id} - 백그라운드 분석 실패: {e}")
 
 
 class PostCreate(BaseModel):
@@ -320,7 +421,7 @@ async def create_post(request: Request, data: PostCreate):
             detail="내용은 5자 이상이어야 합니다"
         )
     
-    # 비윤리/스팸 자동 분석
+    # 비윤리/스팸 자동 분석 (동기 방식)
     content_text = f"{data.title}\n{data.content}"
     client_ip = request.client.host if request.client else None
     content_status, analysis_result, block_reason = await analyze_and_log_content(content_text, client_ip)
@@ -344,6 +445,48 @@ async def create_post(request: Request, data: PostCreate):
         'success': True,
         'message': '게시글이 작성되었습니다',
         'post_id': post_id
+    }
+
+
+@router.get("/board/posts/{post_id}/status")
+async def check_post_status(request: Request, post_id: int):
+    """
+    게시글 상태 확인 (분석 결과 확인용)
+    작성자만 자신의 게시글 상태 확인 가능
+    """
+    # 인증 확인
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인이 필요합니다"
+        )
+    
+    # 게시글 조회 (모든 상태 포함)
+    post = execute_query("""
+        SELECT id, user_id, title, status
+        FROM board
+        WHERE id = %s
+    """, (post_id,), fetch_one=True)
+    
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시글을 찾을 수 없습니다"
+        )
+    
+    # 작성자 확인
+    if post['user_id'] != user['user_id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="본인의 게시글만 확인할 수 있습니다"
+        )
+    
+    return {
+        'success': True,
+        'post_id': post['id'],
+        'status': post['status'],
+        'title': post['title']
     }
 
 
@@ -552,7 +695,7 @@ async def create_comment(request: Request, post_id: int, data: CommentCreate):
                 detail="부모 댓글을 찾을 수 없습니다"
             )
     
-    # 비윤리/스팸 자동 분석
+    # 비윤리/스팸 자동 분석 (동기 방식)
     client_ip = request.client.host if request.client else None
     content_status, analysis_result, block_reason = await analyze_and_log_content(data.content, client_ip)
     
@@ -575,6 +718,48 @@ async def create_comment(request: Request, post_id: int, data: CommentCreate):
         'success': True,
         'message': '댓글이 작성되었습니다',
         'comment_id': comment_id
+    }
+
+
+@router.get("/board/comments/{comment_id}/status")
+async def check_comment_status(request: Request, comment_id: int):
+    """
+    댓글 상태 확인 (분석 결과 확인용)
+    작성자만 자신의 댓글 상태 확인 가능
+    """
+    # 인증 확인
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인이 필요합니다"
+        )
+    
+    # 댓글 조회 (모든 상태 포함)
+    comment = execute_query("""
+        SELECT id, user_id, content, status
+        FROM comment
+        WHERE id = %s
+    """, (comment_id,), fetch_one=True)
+    
+    if not comment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="댓글을 찾을 수 없습니다"
+        )
+    
+    # 작성자 확인
+    if comment['user_id'] != user['user_id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="본인의 댓글만 확인할 수 있습니다"
+        )
+    
+    return {
+        'success': True,
+        'comment_id': comment['id'],
+        'status': comment['status'],
+        'content': comment['content']
     }
 
 
@@ -687,5 +872,199 @@ async def get_categories():
     return {
         'success': True,
         'categories': categories
+    }
+
+
+# ===== 신고 API =====
+
+class ReportCreate(BaseModel):
+    """신고 생성 모델"""
+    reason: str  # '욕설 및 비방', '도배 및 광고', '사생활 침해', '저작권 침해'
+    detail: Optional[str] = None  # 상세 사유 (선택)
+
+
+@router.post("/board/posts/{post_id}/report")
+async def report_post(request: Request, post_id: int, data: ReportCreate):
+    """게시글 신고 (로그인 필요)"""
+    
+    # 인증 확인
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인이 필요합니다"
+        )
+    
+    # 게시글 존재 확인
+    post = execute_query(
+        "SELECT id, user_id, title, content FROM board WHERE id = %s AND status = 'exposed'",
+        (post_id,),
+        fetch_one=True
+    )
+    
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="게시글을 찾을 수 없습니다"
+        )
+    
+    # 자기 게시글은 신고 불가
+    if post['user_id'] and post['user_id'] == user['user_id']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="자신의 게시글은 신고할 수 없습니다"
+        )
+    
+    # 신고 사유 검증
+    valid_reasons = ['욕설 및 비방', '도배 및 광고', '사생활 침해', '저작권 침해']
+    if data.reason not in valid_reasons:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"올바른 신고 사유를 선택해주세요: {', '.join(valid_reasons)}"
+        )
+    
+    # 중복 신고 확인 (같은 사용자가 같은 게시글을 이미 신고했는지)
+    existing_report = execute_query("""
+        SELECT id FROM report 
+        WHERE reporter_id = %s 
+        AND board_id = %s 
+        AND status = 'pending'
+    """, (user['user_id'], post_id), fetch_one=True)
+    
+    if existing_report:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 신고한 게시글입니다"
+        )
+    
+    # 신고 내용 생성 (게시글 정보 저장)
+    reported_content = f"[제목] {post['title']}\n[내용] {post['content'][:200]}{'...' if len(post['content']) > 200 else ''}"
+    
+    # 신고 생성
+    report_id = execute_query("""
+        INSERT INTO report 
+        (report_type, board_id, reported_content, report_reason, report_detail, reporter_id, status, priority)
+        VALUES ('board', %s, %s, %s, %s, %s, 'pending', 'normal')
+    """, (post_id, reported_content, data.reason, data.detail, user['user_id']))
+    
+    return {
+        'success': True,
+        'message': '신고가 접수되었습니다. 검토 후 조치하겠습니다.',
+        'report_id': report_id
+    }
+
+
+@router.get("/board/posts/{post_id}/report/check")
+async def check_report_status(request: Request, post_id: int):
+    """게시글 신고 여부 확인 (로그인 필요)"""
+    
+    user = get_current_user(request)
+    if not user:
+        return {'reported': False}
+    
+    # 사용자가 이 게시글을 신고했는지 확인
+    report = execute_query("""
+        SELECT id, report_reason, status 
+        FROM report 
+        WHERE reporter_id = %s AND board_id = %s AND status = 'pending'
+    """, (user['user_id'], post_id), fetch_one=True)
+    
+    return {
+        'reported': bool(report),
+        'report_reason': report['report_reason'] if report else None,
+        'report_id': report['id'] if report else None
+    }
+
+
+@router.post("/board/comments/{comment_id}/report")
+async def report_comment(request: Request, comment_id: int, data: ReportCreate):
+    """댓글 신고 (로그인 필요)"""
+    
+    # 인증 확인
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인이 필요합니다"
+        )
+    
+    # 댓글 존재 확인
+    comment = execute_query(
+        "SELECT id, user_id, content, board_id FROM comment WHERE id = %s AND status = 'exposed'",
+        (comment_id,),
+        fetch_one=True
+    )
+    
+    if not comment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="댓글을 찾을 수 없습니다"
+        )
+    
+    # 자기 댓글은 신고 불가
+    if comment['user_id'] and comment['user_id'] == user['user_id']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="자신의 댓글은 신고할 수 없습니다"
+        )
+    
+    # 신고 사유 검증
+    valid_reasons = ['욕설 및 비방', '도배 및 광고', '사생활 침해', '저작권 침해']
+    if data.reason not in valid_reasons:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"올바른 신고 사유를 선택해주세요: {', '.join(valid_reasons)}"
+        )
+    
+    # 중복 신고 확인 (같은 사용자가 같은 댓글을 이미 신고했는지)
+    existing_report = execute_query("""
+        SELECT id FROM report 
+        WHERE reporter_id = %s 
+        AND comment_id = %s 
+        AND status = 'pending'
+    """, (user['user_id'], comment_id), fetch_one=True)
+    
+    if existing_report:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 신고한 댓글입니다"
+        )
+    
+    # 신고 내용 생성 (댓글 정보 저장)
+    reported_content = f"[댓글] {comment['content'][:200]}{'...' if len(comment['content']) > 200 else ''}"
+    
+    # 신고 생성
+    report_id = execute_query("""
+        INSERT INTO report 
+        (report_type, comment_id, reported_content, report_reason, report_detail, reporter_id, status, priority)
+        VALUES ('comment', %s, %s, %s, %s, %s, 'pending', 'normal')
+    """, (comment_id, reported_content, data.reason, data.detail, user['user_id']))
+    
+    return {
+        'success': True,
+        'message': '신고가 접수되었습니다. 검토 후 조치하겠습니다.',
+        'report_id': report_id
+    }
+
+
+@router.get("/board/comments/{comment_id}/report/check")
+async def check_comment_report_status(request: Request, comment_id: int):
+    """댓글 신고 여부 확인 (로그인 필요)"""
+    
+    user = get_current_user(request)
+    if not user:
+        return {'reported': False}
+    
+    # 사용자가 이 댓글을 신고했는지 확인
+    report = execute_query("""
+        SELECT id, report_reason, status 
+        FROM report 
+        WHERE reporter_id = %s AND comment_id = %s AND status = 'pending'
+    """, (user['user_id'], comment_id), fetch_one=True)
+    
+    return {
+        'reported': bool(report),
+        'report_reason': report['report_reason'] if report else None,
+        'report_id': report['id'] if report else None
     }
 

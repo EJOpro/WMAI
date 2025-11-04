@@ -122,3 +122,53 @@ def is_authenticated(request: Request) -> bool:
     """
     return get_current_user(request) is not None
 
+
+def is_admin(request: Request) -> bool:
+    """
+    현재 사용자가 관리자인지 확인
+    
+    Args:
+        request: FastAPI Request 객체
+    
+    Returns:
+        관리자 여부
+    """
+    user = get_current_user(request)
+    if not user:
+        return False
+    
+    # DB에서 사용자 role 확인
+    from app.database import execute_query
+    try:
+        user_data = execute_query(
+            "SELECT role FROM users WHERE id = %s",
+            (user['user_id'],),
+            fetch_one=True
+        )
+        return user_data and user_data['role'] == 'admin'
+    except Exception as e:
+        print(f"[ERROR] Admin check failed: {e}")
+        return False
+
+
+def require_admin(request: Request):
+    """
+    관리자 권한 필수 체크 (데코레이터/헬퍼)
+    관리자가 아니면 HTTPException 발생
+    
+    Args:
+        request: FastAPI Request 객체
+    
+    Returns:
+        사용자 정보 딕셔너리
+    
+    Raises:
+        HTTPException: 관리자 권한이 없는 경우
+    """
+    if not is_admin(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="관리자 권한이 필요합니다"
+        )
+    return get_current_user(request)
+
