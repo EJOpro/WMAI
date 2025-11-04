@@ -135,6 +135,34 @@ async def get_data_status(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"데이터 상태 확인 실패: {str(e)}")
 
+@router.delete("/events/clear")
+async def clear_events(db: Session = Depends(get_db)):
+    """모든 이벤트 데이터 삭제"""
+    try:
+        from sqlalchemy import text
+        
+        # 외래키 제약 조건 비활성화 (SQLite)
+        from .chrun_database import DATABASE_URL
+        if DATABASE_URL.startswith('sqlite'):
+            db.execute(text("PRAGMA foreign_keys=OFF"))
+        
+        # 관련 테이블 데이터 삭제
+        db.execute(text("DELETE FROM events"))
+        db.execute(text("DELETE FROM users"))
+        db.execute(text("DELETE FROM monthly_metrics"))
+        db.execute(text("DELETE FROM user_segments"))
+        
+        db.commit()
+        
+        # 캐시 무효화
+        invalidate_cache()
+        
+        return {"message": "모든 이벤트 데이터가 삭제되었습니다."}
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"데이터 삭제 실패: {str(e)}")
+
 @router.post("/events/bulk")
 async def upload_events(events: List[EventCreate], db: Session = Depends(get_db)):
     """이벤트 데이터 대량 업로드"""
@@ -359,6 +387,43 @@ async def get_monthly_report(month: str, db: Session = Depends(get_db)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/reports/verification/{month}")
+async def get_verification_report(
+    month: str,
+    threshold: int = 1,
+    db: Session = Depends(get_db)
+):
+    """계산 검증 상세 리포트"""
+    
+    cache_key = f"verification:{month}:{threshold}"
+    
+    # 캐시된 결과 확인
+    if redis_client:
+        try:
+            cached_result = redis_client.get(cache_key)
+            if cached_result:
+                return json.loads(cached_result)
+        except Exception as e:
+            print(f"⚠️ Redis 캐시 읽기 실패: {e}")
+    
+    try:
+        analyzer = ChurnAnalyzer(db)
+        report = analyzer.get_detailed_verification_report(month, threshold)
+        
+        # 캐시 저장 (30분)
+        if redis_client:
+            try:
+                redis_client.setex(cache_key, 1800, json.dumps(report, default=str))
+            except Exception as e:
+                print(f"⚠️ Redis 캐시 쓰기 실패: {e}")
+        
+        return report
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"검증 리포트 생성 실패: {str(e)}")
 
 @router.delete("/cache/clear")
 async def clear_cache():
