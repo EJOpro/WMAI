@@ -205,14 +205,23 @@ function validateCSVFile(file) {
             // 전역 변수에 저장
             window.csvData = data;
             
-    // 백엔드에 데이터 업로드 (임시로 비활성화)
-    // uploadToBackend(data).then(backendResult => {
-    //     if (backendResult.success) {
-    //         console.log('[DEBUG] 백엔드 업로드 성공:', backendResult.message);
-    //     } else {
-    //         console.warn('[WARNING] 백엔드 업로드 실패:', backendResult.error);
-    //     }
-    // });
+            // 백엔드에 데이터 업로드
+            uploadToBackend(data).then(async (backendResult) => {
+                if (backendResult.success) {
+                    console.log('[DEBUG] 백엔드 업로드 성공:', backendResult.message);
+                    // 업로드 후 캐시 클리어하여 새로운 데이터 기반 분석이 되도록 함
+                    const cacheResult = await clearBackendCache();
+                    if (cacheResult.success) {
+                        console.log('[DEBUG] 백엔드 캐시 클리어 완료');
+                        addLog('백엔드 데이터 업로드 및 캐시 클리어 완료', 'success');
+                    } else {
+                        console.warn('[WARNING] 캐시 클리어 실패:', cacheResult.message);
+                    }
+                } else {
+                    console.warn('[WARNING] 백엔드 업로드 실패:', backendResult.error);
+                    addLog(`백엔드 업로드 실패: ${backendResult.error}`, 'warning');
+                }
+            });
             
             resolve({
                 success: true,
@@ -228,6 +237,22 @@ function validateCSVFile(file) {
 // 백엔드에 데이터 업로드
 async function uploadToBackend(data) {
     try {
+        // 먼저 기존 데이터 삭제 (새로운 데이터로 교체하기 위해)
+        try {
+            const clearResponse = await fetch('/api/churn/events/clear', {
+                method: 'DELETE'
+            });
+            if (clearResponse.ok) {
+                const clearResult = await clearResponse.json();
+                console.log('[DEBUG] 기존 데이터 삭제 완료:', clearResult.message);
+            } else {
+                console.warn('[WARNING] 기존 데이터 삭제 실패:', clearResponse.status);
+            }
+        } catch (clearError) {
+            console.warn('[WARNING] 기존 데이터 삭제 중 오류:', clearError);
+            // 삭제 실패해도 업로드는 계속 진행
+        }
+        
         // 백엔드 형식에 맞게 변환
         const events = data.map(row => ({
             user_hash: row.user_hash,
@@ -249,7 +274,9 @@ async function uploadToBackend(data) {
             });
             
             if (!response.ok) {
-                console.warn(`[WARNING] 백엔드 업로드 청크 ${Math.floor(i / chunkSize) + 1} 실패`);
+                const errorText = await response.text();
+                console.warn(`[WARNING] 백엔드 업로드 청크 ${Math.floor(i / chunkSize) + 1} 실패:`, errorText);
+                throw new Error(`청크 ${Math.floor(i / chunkSize) + 1} 업로드 실패: ${response.status}`);
             }
         }
         
@@ -2105,6 +2132,130 @@ function generateBasicActions(metrics, segmentAnalysis) {
     }
     
     return actions.slice(0, 3); // 최대 3개
+}
+
+// 계산 검증 리포트 표시
+async function showVerificationReport() {
+    const config = getCurrentConfig();
+    const endMonth = config.endDate ? config.endDate.substring(0, 7) : '2025-10';
+    
+    const verificationCard = document.getElementById('verificationReportCard');
+    const verificationContent = document.getElementById('verificationReportContent');
+    
+    // 리포트 표시
+    verificationCard.style.display = 'block';
+    verificationContent.innerHTML = '<p class="text-muted"><i class="fas fa-spinner fa-spin"></i> 검증 리포트를 생성하는 중...</p>';
+    
+    try {
+        const response = await fetch(`/api/churn/reports/verification/${endMonth}?threshold=1`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const report = await response.json();
+        
+        // 리포트 HTML 생성
+        let html = `
+            <div class="verification-summary mb-4">
+                <h6><i class="fas fa-info-circle"></i> 계산 요약</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered">
+                        <tr>
+                            <th>이전월 (${report.config.previous_month})</th>
+                            <td>${report.summary.previous_active_count}명</td>
+                        </tr>
+                        <tr>
+                            <th>현재월 (${report.config.month})</th>
+                            <td>${report.summary.current_active_count}명</td>
+                        </tr>
+                        <tr>
+                            <th>이탈자</th>
+                            <td class="text-danger">${report.summary.churned_count}명</td>
+                        </tr>
+                        <tr>
+                            <th>유지자</th>
+                            <td class="text-success">${report.summary.retained_count}명</td>
+                        </tr>
+                        <tr>
+                            <th>재활성</th>
+                            <td class="text-info">${report.summary.reactivated_count}명</td>
+                        </tr>
+                        <tr class="table-primary">
+                            <th>이탈률</th>
+                            <td><strong>${report.summary.churn_rate}%</strong></td>
+                        </tr>
+                        <tr>
+                            <th>유지율</th>
+                            <td>${report.summary.retention_rate}%</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="calculation-steps mb-4">
+                <h6><i class="fas fa-list-ol"></i> 계산 단계</h6>
+                <ol>
+                    <li>${report.calculation_steps.step1}</li>
+                    <li>${report.calculation_steps.step2}</li>
+                    <li>${report.calculation_steps.step3}</li>
+                    <li>${report.calculation_steps.step4}</li>
+                    <li>${report.calculation_steps.step5}</li>
+                    <li><strong>${report.calculation_steps.step6}</strong></li>
+                </ol>
+            </div>
+            
+            <div class="user-lists mb-4">
+                <h6><i class="fas fa-users"></i> 사용자 목록</h6>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <strong>이전월 활성 사용자 (${report.user_lists.previous_active_users.length}명):</strong>
+                        <ul class="list-group list-group-flush mt-2">
+                            ${report.user_lists.previous_active_users.slice(0, 20).map(u => `<li class="list-group-item py-1">${u}</li>`).join('')}
+                            ${report.user_lists.previous_active_users.length > 20 ? `<li class="list-group-item py-1 text-muted">... 외 ${report.user_lists.previous_active_users.length - 20}명</li>` : ''}
+                        </ul>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <strong>현재월 활성 사용자 (${report.user_lists.current_active_users.length}명):</strong>
+                        <ul class="list-group list-group-flush mt-2">
+                            ${report.user_lists.current_active_users.slice(0, 20).map(u => `<li class="list-group-item py-1">${u}</li>`).join('')}
+                            ${report.user_lists.current_active_users.length > 20 ? `<li class="list-group-item py-1 text-muted">... 외 ${report.user_lists.current_active_users.length - 20}명</li>` : ''}
+                        </ul>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6 mb-3">
+                        <strong class="text-danger">이탈자 (${report.user_lists.churned_users.length}명):</strong>
+                        <ul class="list-group list-group-flush mt-2">
+                            ${report.user_lists.churned_users.map(u => `<li class="list-group-item py-1">${u}</li>`).join('')}
+                            ${report.user_lists.churned_users.length === 0 ? '<li class="list-group-item py-1 text-muted">없음</li>' : ''}
+                        </ul>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <strong class="text-info">재활성 사용자 (${report.user_lists.reactivated_users.length}명):</strong>
+                        <ul class="list-group list-group-flush mt-2">
+                            ${report.user_lists.reactivated_users.map(u => `<li class="list-group-item py-1">${u}</li>`).join('')}
+                            ${report.user_lists.reactivated_users.length === 0 ? '<li class="list-group-item py-1 text-muted">없음</li>' : ''}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        verificationContent.innerHTML = html;
+        addLog('검증 리포트 생성 완료', 'success');
+        
+        // 리포트로 스크롤
+        verificationCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+    } catch (error) {
+        console.error('[ERROR] 검증 리포트 생성 실패:', error);
+        verificationContent.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle"></i> 검증 리포트 생성 실패: ${error.message}
+            </div>
+        `;
+        addLog(`검증 리포트 생성 실패: ${error.message}`, 'error');
+    }
 }
 
 // 리포트 섹션 업데이트 (기존 함수 개선)

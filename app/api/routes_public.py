@@ -69,6 +69,14 @@ async def churn_dashboard(request: Request):
         {"request": request, "title": "이탈자 분석 시스템"}
     )
 
+@router.get("/risk_dashboard", response_class=HTMLResponse)
+async def risk_dashboard(request: Request):
+    """이탈 징후 관리자 대시보드"""
+    return templates.TemplateResponse(
+        "pages/risk_dashboard.html",
+        {"request": request, "title": "이탈 징후 관리자 대시보드"}
+    )
+
 @router.get("/reports/admin", response_class=HTMLResponse)
 async def reports_admin(request: Request):
     """신고 관리 페이지"""

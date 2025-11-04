@@ -212,11 +212,14 @@
 
                     <!-- 리포트 탭 -->
                     <div class="tab-pane" id="report">
-                        <div class="card">
-                            <div class="card-header">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
                                 <h5 class="card-title mb-0">
                                     <i class="fas fa-file-alt"></i> AI 기반 이탈 분석 리포트
                                 </h5>
+                                <button class="btn btn-sm btn-outline-primary" id="showVerificationBtn" onclick="showVerificationReport()">
+                                    <i class="fas fa-calculator"></i> 계산 검증 리포트
+                                </button>
                             </div>
                             <div class="card-body">
                                 <!-- 주요 인사이트 -->
@@ -260,6 +263,20 @@
                                     </div>
                                 </div>
 
+                            </div>
+                        </div>
+
+                        <!-- 계산 검증 리포트 -->
+                        <div class="card" id="verificationReportCard" style="display: none;">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-calculator"></i> 계산 검증 리포트
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="verificationReportContent">
+                                    <p class="text-muted">검증 리포트를 불러오는 중...</p>
+                                </div>
                             </div>
                         </div>
                     </div>
