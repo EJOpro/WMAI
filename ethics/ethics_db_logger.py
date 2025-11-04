@@ -30,13 +30,13 @@ class DatabaseLogger:
             port: MySQL 서버 포트 (환경변수 DB_PORT 또는 기본값 3306)
             user: MySQL 사용자명 (환경변수 DB_USER 또는 기본값 'root')
             password: MySQL 비밀번호 (환경변수 DB_PASSWORD)
-            database: MySQL 데이터베이스명 (환경변수 DB_NAME 또는 기본값 'ethics_logs')
+            database: MySQL 데이터베이스명 (환경변수 DB_NAME 또는 기본값 'wmai')
         """
         self.host = host or os.getenv('DB_HOST', 'localhost')
         self.port = port or int(os.getenv('DB_PORT', '3306'))
         self.user = user or os.getenv('DB_USER', 'root')
         self.password = password or os.getenv('DB_PASSWORD', '')
-        self.database = database or os.getenv('DB_NAME', 'ethics_logs')
+        self.database = database or os.getenv('DB_NAME', 'wmai')
         
         # 데이터베이스 초기화
         self._init_database()
@@ -77,35 +77,34 @@ class DatabaseLogger:
         
         # 분석 로그 테이블
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS analysis_logs (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            CREATE TABLE IF NOT EXISTS ethics_logs (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 text TEXT NOT NULL,
                 score DOUBLE NOT NULL,
                 confidence DOUBLE NOT NULL,
                 spam DOUBLE NOT NULL,
-                spam_confidence DOUBLE,
+                spam_confidence DOUBLE DEFAULT NULL,
                 types TEXT,
-                ip_address VARCHAR(50),
+                ip_address VARCHAR(50) DEFAULT NULL,
                 user_agent TEXT,
-                response_time DOUBLE,
+                response_time DOUBLE DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_timestamp (timestamp),
-                INDEX idx_score (score),
-                INDEX idx_created_at (created_at)
+                INDEX idx_ethics_created_at (created_at DESC),
+                INDEX idx_ethics_score (score),
+                INDEX idx_ethics_spam (spam)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
         
         # 기존 테이블에 types 컬럼 추가 (마이그레이션)
         try:
-            cursor.execute("ALTER TABLE analysis_logs ADD COLUMN types TEXT")
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN types TEXT")
         except pymysql.err.OperationalError:
             # types 컬럼이 이미 있으면 무시
             pass
         
         # 기존 테이블에 spam_confidence 컬럼 추가 (마이그레이션)
         try:
-            cursor.execute("ALTER TABLE analysis_logs ADD COLUMN spam_confidence DOUBLE")
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN spam_confidence DOUBLE")
         except pymysql.err.OperationalError:
             # spam_confidence 컬럼이 이미 있으면 무시
             pass
@@ -150,7 +149,7 @@ class DatabaseLogger:
         types_json = json.dumps(types, ensure_ascii=False)
         
         cursor.execute("""
-            INSERT INTO analysis_logs 
+            INSERT INTO ethics_logs 
             (text, score, confidence, spam, spam_confidence, types, ip_address, user_agent, response_time)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (text, score, confidence, spam, spam_confidence, types_json, ip_address, user_agent, response_time))
@@ -187,7 +186,7 @@ class DatabaseLogger:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        query = "SELECT * FROM analysis_logs WHERE 1=1"
+        query = "SELECT * FROM ethics_logs WHERE 1=1"
         params = []
         
         if min_score is not None:
@@ -236,7 +235,7 @@ class DatabaseLogger:
         
         # 전체 로그 수
         cursor.execute("""
-            SELECT COUNT(*) as count FROM analysis_logs
+            SELECT COUNT(*) as count FROM ethics_logs
             WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (days,))
         total_count = cursor.fetchone()['count']
@@ -247,14 +246,14 @@ class DatabaseLogger:
                 AVG(score) as avg_score,
                 AVG(confidence) as avg_confidence,
                 AVG(spam) as avg_spam
-            FROM analysis_logs
+            FROM ethics_logs
             WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (days,))
         avgs = cursor.fetchone()
         
         # 고위험 건수 (score >= 70)
         cursor.execute("""
-            SELECT COUNT(*) as count FROM analysis_logs
+            SELECT COUNT(*) as count FROM ethics_logs
             WHERE score >= 70
             AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (days,))
@@ -262,7 +261,7 @@ class DatabaseLogger:
         
         # 스팸 건수 (spam >= 60)
         cursor.execute("""
-            SELECT COUNT(*) as count FROM analysis_logs
+            SELECT COUNT(*) as count FROM ethics_logs
             WHERE spam >= 60
             AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (days,))
@@ -274,7 +273,7 @@ class DatabaseLogger:
                 DATE(created_at) as date,
                 COUNT(*) as count,
                 AVG(score) as avg_score
-            FROM analysis_logs
+            FROM ethics_logs
             WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
             GROUP BY DATE(created_at)
             ORDER BY date DESC
@@ -314,7 +313,7 @@ class DatabaseLogger:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("DELETE FROM analysis_logs WHERE id = %s", (log_id,))
+        cursor.execute("DELETE FROM ethics_logs WHERE id = %s", (log_id,))
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()
@@ -335,7 +334,7 @@ class DatabaseLogger:
         cursor = conn.cursor()
         
         cursor.execute("""
-            DELETE FROM analysis_logs
+            DELETE FROM ethics_logs
             WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (days,))
         
@@ -355,7 +354,7 @@ class DatabaseLogger:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("DELETE FROM analysis_logs")
+        cursor.execute("DELETE FROM ethics_logs")
         
         deleted_count = cursor.rowcount
         conn.commit()
