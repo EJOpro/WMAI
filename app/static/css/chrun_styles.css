@@ -348,29 +348,6 @@ canvas {
     box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
 }
 
-/* 다크 모드 지원 (선택사항) */
-@media (prefers-color-scheme: dark) {
-    body {
-        background-color: #1a1a1a;
-        color: #ffffff;
-    }
-    
-    .sidebar {
-        background-color: #2d3748;
-        color: #ffffff;
-    }
-    
-    .card {
-        background-color: #2d3748;
-        color: #ffffff;
-    }
-    
-    .card-header {
-        background-color: #4a5568;
-        border-bottom-color: #4a5568;
-    }
-}
-
 /* ====== Churn 페이지: Bootstrap 제거에 따른 레이아웃/컴포넌트 보강 ====== */
 .churn-layout {
     display: grid;

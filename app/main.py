@@ -60,6 +60,13 @@ try:
 except Exception as e:
     print(f"[WARN] 정적 파일 마운트 실패: {e}")
 
+# 이탈 분석 대시보드 정적 파일 서빙
+try:
+    app.mount("/chrun_static", StaticFiles(directory="chrun_dashboard"), name="chrun_static")
+    print("[OK] 이탈 분석 대시보드 정적 파일 마운트 완료")
+except Exception as e:
+    print(f"[WARN] 이탈 분석 대시보드 정적 파일 마운트 실패: {e}")
+
 # 라우터 등록
 try:
     from app.api import routes_public, routes_health, routes_api, routes_match
@@ -72,6 +79,26 @@ except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
     # 기본 라우트만 제공
     pass
+
+# 이탈 분석 대시보드 라우터 등록
+try:
+    from chrun_backend.chrun_main import router as churn_router
+    from chrun_backend.chrun_database import init_db
+    
+    # 데이터베이스 초기화
+    init_db()
+    print("[OK] 데이터베이스 초기화 완료")
+    
+    app.include_router(
+        churn_router,
+        prefix="/api/churn",
+        tags=["churn-analysis"]
+    )
+    print("[OK] 이탈 분석 라우터 등록 완료")
+except ImportError as e:
+    print(f"[WARN] 이탈 분석 라우터 임포트 실패: {e}")
+except Exception as e:
+    print(f"[ERROR] 데이터베이스 초기화 실패: {e}")
 
 # 루트 경로 (메인 페이지)
 @app.get("/", response_class=HTMLResponse)
