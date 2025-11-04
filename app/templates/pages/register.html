@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>회원가입 - Community Admin</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <style>
+        .auth-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 40px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .auth-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .auth-header h1 {
+            font-size: 28px;
+            color: #1F2937;
+            margin: 0 0 10px 0;
+        }
+        .auth-header p {
+            color: #6B7280;
+            margin: 0;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 500;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #3B82F6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .form-help {
+            font-size: 12px;
+            color: #6B7280;
+            margin-top: 4px;
+        }
+        .btn-auth {
+            width: 100%;
+            padding: 12px;
+            background: #3B82F6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-auth:hover {
+            background: #2563EB;
+        }
+        .btn-auth:disabled {
+            background: #9CA3AF;
+            cursor: not-allowed;
+        }
+        .auth-footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #6B7280;
+        }
+        .auth-footer a {
+            color: #3B82F6;
+            text-decoration: none;
+        }
+        .auth-footer a:hover {
+            text-decoration: underline;
+        }
+        .alert {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .alert-error {
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #FCA5A5;
+        }
+        .alert-success {
+            background: #D1FAE5;
+            color: #065F46;
+            border: 1px solid #6EE7B7;
+        }
+    </style>
+</head>
+<body style="background-color: #F9FAFB;">
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>회원가입</h1>
+            <p>새 계정을 만들어 시작하세요</p>
+        </div>
+
+        <div id="alert" class="alert"></div>
+
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="username">사용자명</label>
+                <input type="text" id="username" name="username" required autocomplete="username" minlength="3" maxlength="20">
+                <div class="form-help">3-20자 사이로 입력해주세요</div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">비밀번호</label>
+                <input type="password" id="password" name="password" required autocomplete="new-password" minlength="3">
+                <div class="form-help">3자 이상 입력해주세요</div>
+            </div>
+
+            <div class="form-group">
+                <label for="passwordConfirm">비밀번호 확인</label>
+                <input type="password" id="passwordConfirm" name="passwordConfirm" required autocomplete="new-password" minlength="3">
+            </div>
+
+            <button type="submit" class="btn-auth" id="submitBtn">회원가입</button>
+        </form>
+
+        <div class="auth-footer">
+            이미 계정이 있으신가요? <a href="/login">로그인</a>
+            <br>
+            <a href="/" style="margin-top: 10px; display: inline-block;">홈으로 돌아가기</a>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('registerForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const alert = document.getElementById('alert');
+
+        function showAlert(message, type = 'error') {
+            alert.textContent = message;
+            alert.className = `alert alert-${type}`;
+            alert.style.display = 'block';
+        }
+
+        function hideAlert() {
+            alert.style.display = 'none';
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideAlert();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const passwordConfirm = document.getElementById('passwordConfirm').value;
+
+            // 클라이언트 측 검증
+            if (username.length < 3 || username.length > 20) {
+                showAlert('사용자명은 3-20자 사이여야 합니다');
+                return;
+            }
+
+            if (password.length < 3) {
+                showAlert('비밀번호는 3자 이상이어야 합니다');
+                return;
+            }
+
+            if (password !== passwordConfirm) {
+                showAlert('비밀번호가 일치하지 않습니다');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = '가입 중...';
+
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showAlert('회원가입이 완료되었습니다! 로그인 페이지로 이동합니다...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
+                } else {
+                    showAlert(data.detail || '회원가입에 실패했습니다');
+                }
+            } catch (error) {
+                console.error('Register error:', error);
+                showAlert('서버 오류가 발생했습니다');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '회원가입';
+            }
+        });
+    </script>
+</body>
+</html>
+

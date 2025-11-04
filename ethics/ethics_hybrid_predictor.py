@@ -141,7 +141,7 @@ class HybridEthicsAnalyzer:
         
         # OpenAI 클라이언트 초기화
         self.api_key = api_key or os.getenv('OPENAI_API_KEY')
-        self.model_name = model_name or os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+        self.model_name = model_name or 'gpt-4.1-nano'
         
         if not self.api_key:
             raise ValueError("OpenAI API 키가 설정되지 않았습니다. .env 파일을 확인하세요.")

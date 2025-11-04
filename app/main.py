@@ -19,9 +19,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import secrets
 
 # 환경 변수 로드 (match_config.env 파일)
 load_dotenv('match_config.env')
@@ -33,6 +35,17 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",  # Swagger UI
     redoc_url="/redoc"  # ReDoc
+)
+
+# 세션 미들웨어 추가 (인증에 필요)
+SESSION_SECRET_KEY = os.getenv('SESSION_SECRET_KEY', secrets.token_urlsafe(32))
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    session_cookie="wmai_session",
+    max_age=86400,  # 24시간
+    same_site="lax",
+    https_only=False  # 개발 환경에서는 False, 프로덕션에서는 True
 )
 
 # CORS 설정 (프론트엔드 개발용)
@@ -62,12 +75,15 @@ except Exception as e:
 
 # 라우터 등록
 try:
-    from app.api import routes_public, routes_health, routes_api, routes_match
+    from app.api import routes_public, routes_health, routes_api, routes_match, routes_auth, routes_board, routes_admin
     app.include_router(routes_public.router)
     app.include_router(routes_health.router)
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_match.router, prefix="/api")  # WMAA 신고 검증 API
-    print("[OK] 기본 라우터 등록 완료 (WMAA 포함)")
+    app.include_router(routes_auth.router, prefix="/api")  # 인증 API
+    app.include_router(routes_board.router, prefix="/api")  # 게시판 API
+    app.include_router(routes_admin.router, prefix="/api")  # 관리자 API
+    print("[OK] 모든 라우터 등록 완료 (WMAA, Auth, Board, Admin 포함)")
 except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
     # 기본 라우트만 제공
