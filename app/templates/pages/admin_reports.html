@@ -566,7 +566,7 @@
                 if (report.processed_date) {
                     const processedDate = new Date(report.processed_date).toLocaleString('ko-KR');
                     processInfo = `
-                        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #E5E7EB; font-size: 13px; color: #6B7280;">
+                        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #E5E7EB; font-size: 14px; color: #6B7280;">
                             <strong>처리 시간:</strong> ${processedDate}
                             ${report.processing_note ? `<br><strong>관리자 처리 사유:</strong> ${report.processing_note}` : ''}
                         </div>

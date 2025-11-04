@@ -185,3 +185,71 @@ async def process_report(request: Request, report_id: int, data: ReportProcessRe
         'new_status': new_status
     }
 
+
+@router.get("/admin/reports/{report_id}/analysis")
+async def get_report_analysis(request: Request, report_id: int):
+    """
+    신고 분석 결과 조회 (관리자 전용)
+    
+    Args:
+        report_id: 신고 ID
+    
+    Returns:
+        분석 결과 (result, confidence, analysis)
+    """
+    require_admin(request)
+    
+    # 신고 존재 확인
+    report = execute_query(
+        "SELECT id FROM report WHERE id = %s",
+        (report_id,),
+        fetch_one=True
+    )
+    
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="신고를 찾을 수 없습니다"
+        )
+    
+    # 분석 결과 조회
+    analysis = execute_query("""
+        SELECT 
+            id,
+            result,
+            confidence,
+            analysis,
+            created_at
+        FROM report_analysis
+        WHERE report_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, (report_id,), fetch_one=True)
+    
+    if not analysis:
+        return {
+            'success': True,
+            'has_analysis': False,
+            'message': '아직 분석이 완료되지 않았습니다'
+        }
+    
+    # 결과 타입을 한글로 변환
+    result_map = {
+        'match': '일치',
+        'partial_match': '부분일치',
+        'mismatch': '불일치'
+    }
+    
+    return {
+        'success': True,
+        'has_analysis': True,
+        'analysis': {
+            'id': analysis['id'],
+            'result': analysis['result'],
+            'result_text': result_map.get(analysis['result'], analysis['result']),
+            'confidence': analysis['confidence'],
+            'analysis': analysis['analysis'],
+            'created_at': analysis['created_at'].isoformat() if analysis['created_at'] else None
+        }
+    }
+

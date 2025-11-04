@@ -8,9 +8,11 @@ from typing import Optional, List, Tuple
 from datetime import datetime
 from app.auth import get_current_user
 from app.database import execute_query, get_db_connection
+from app.settings import settings
 import pymysql
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 router = APIRouter(tags=["board"])
 
@@ -205,6 +207,110 @@ def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = Non
         
     except Exception as e:
         print(f"[ERROR] 댓글 {comment_id} - 백그라운드 분석 실패: {e}")
+
+
+def analyze_and_process_report(report_id: int, content: str, reason: str, target_type: str, target_id: int):
+    """
+    백그라운드에서 신고 분석 및 자동 처리
+    
+    Args:
+        report_id: 신고 ID
+        content: 신고된 콘텐츠 (게시글 또는 댓글 내용)
+        reason: 신고 사유
+        target_type: 'board' 또는 'comment'
+        target_id: 대상 ID (board_id 또는 comment_id)
+    """
+    try:
+        # OpenAI API 키 확인
+        api_key = settings.OPENAI_API_KEY
+        if not api_key:
+            print(f"[WARN] 신고 {report_id} - OpenAI API 키가 설정되지 않아 분석을 건너뜁니다")
+            return
+        
+        # 환경변수 설정 (match_backend에서 사용)
+        os.environ['OPENAI_API_KEY'] = api_key
+        
+        # match_backend의 analyze_with_ai 함수 import 및 실행
+        try:
+            from match_backend.core import analyze_with_ai
+        except ImportError:
+            print(f"[WARN] 신고 {report_id} - match_backend를 import할 수 없어 분석을 건너뜁니다")
+            return
+        
+        # AI 분석 수행
+        print(f"[INFO] 신고 {report_id} 분석 시작 - type: {target_type}, target_id: {target_id}")
+        ai_result = analyze_with_ai(content, reason)
+        
+        score = ai_result.get('score', 50)
+        result_type = ai_result.get('type', '부분일치')
+        analysis = ai_result.get('analysis', '')
+        
+        # 결과 타입을 DB enum 값으로 매핑
+        result_enum = {
+            '일치': 'match',
+            '부분일치': 'partial_match',
+            '불일치': 'mismatch'
+        }.get(result_type, 'partial_match')
+        
+        # report_analysis 테이블에 결과 저장
+        execute_query("""
+            INSERT INTO report_analysis (report_id, result, confidence, analysis)
+            VALUES (%s, %s, %s, %s)
+        """, (report_id, result_enum, score, analysis))
+        
+        # 점수에 따라 자동 처리
+        if score >= 81:
+            # 일치: 게시글/댓글 차단, 신고 승인
+            if target_type == 'board':
+                execute_query(
+                    "UPDATE board SET status = 'blocked' WHERE id = %s",
+                    (target_id,)
+                )
+            else:  # comment
+                execute_query(
+                    "UPDATE comment SET status = 'blocked' WHERE id = %s",
+                    (target_id,)
+                )
+            
+            # processing_note에 분석 결과 포함
+            processing_note = f"AI 자동 처리 (점수: {score}): 신고 내용과 일치하여 콘텐츠 차단\n\n[AI 분석 내용]\n{analysis}"
+            execute_query("""
+                UPDATE report 
+                SET status = 'completed', 
+                    processed_date = NOW(),
+                    processing_note = %s
+                WHERE id = %s
+            """, (processing_note, report_id))
+            
+            print(f"[INFO] 신고 {report_id} 자동 승인 - {target_type} {target_id} 차단됨 (점수: {score})")
+            
+        elif score <= 29:
+            # 불일치: 신고 거부, 게시글/댓글 유지
+            processing_note = f"AI 자동 처리 (점수: {score}): 신고 내용과 불일치하여 거부\n\n[AI 분석 내용]\n{analysis}"
+            execute_query("""
+                UPDATE report 
+                SET status = 'rejected',
+                    processed_date = NOW(),
+                    processing_note = %s
+                WHERE id = %s
+            """, (processing_note, report_id))
+            
+            print(f"[INFO] 신고 {report_id} 자동 거부 - {target_type} {target_id} 유지됨 (점수: {score})")
+            
+        else:
+            # 부분일치: pending 상태 유지, 관리자 검토 필요
+            processing_note = f"AI 분석 완료 (점수: {score}): 부분일치로 관리자 검토 필요\n\n[AI 분석 내용]\n{analysis}"
+            execute_query("""
+                UPDATE report 
+                SET processing_note = %s
+                WHERE id = %s
+            """, (processing_note, report_id))
+            
+            print(f"[INFO] 신고 {report_id} 부분일치 - 관리자 검토 필요 (점수: {score})")
+        
+    except Exception as e:
+        print(f"[ERROR] 신고 {report_id} 자동 분석 실패: {e}")
+        # 오류 발생 시 신고는 pending 상태로 유지
 
 
 class PostCreate(BaseModel):
@@ -947,6 +1053,17 @@ async def report_post(request: Request, post_id: int, data: ReportCreate):
         VALUES ('board', %s, %s, %s, %s, %s, 'pending', 'normal')
     """, (post_id, reported_content, data.reason, data.detail, user['user_id']))
     
+    # 백그라운드에서 AI 일치 분석 시작 (전체 게시글 내용 사용)
+    full_content = f"[제목] {post['title']}\n[내용] {post['content']}"
+    background_executor.submit(
+        analyze_and_process_report,
+        report_id,
+        full_content,
+        data.reason,
+        'board',
+        post_id
+    )
+    
     return {
         'success': True,
         'message': '신고가 접수되었습니다. 검토 후 조치하겠습니다.',
@@ -1039,6 +1156,17 @@ async def report_comment(request: Request, comment_id: int, data: ReportCreate):
         (report_type, comment_id, reported_content, report_reason, report_detail, reporter_id, status, priority)
         VALUES ('comment', %s, %s, %s, %s, %s, 'pending', 'normal')
     """, (comment_id, reported_content, data.reason, data.detail, user['user_id']))
+    
+    # 백그라운드에서 AI 일치 분석 시작 (전체 댓글 내용 사용)
+    full_content = comment['content']
+    background_executor.submit(
+        analyze_and_process_report,
+        report_id,
+        full_content,
+        data.reason,
+        'comment',
+        comment_id
+    )
     
     return {
         'success': True,

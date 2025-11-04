@@ -12,6 +12,19 @@ class Settings(BaseSettings):
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     
+    # 데이터베이스 설정
+    DB_HOST: str = os.getenv("DB_HOST", "localhost")
+    DB_PORT: str = os.getenv("DB_PORT", "3306")
+    DB_USER: str = os.getenv("DB_USER", "root")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
+    DB_NAME: str = os.getenv("DB_NAME", "wmai_db")
+    
+    # 세션 설정
+    SESSION_SECRET_KEY: str = os.getenv("SESSION_SECRET_KEY", "")
+    
+    # OpenAI API 설정
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
