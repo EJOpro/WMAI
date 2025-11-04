@@ -662,13 +662,10 @@ tbody tr:hover {
 
 .options-group {
     display: flex;
-    gap: 20px;
+    justify-content: flex-end;
+    gap: 10px;
     align-items: center;
     flex-wrap: wrap;
-}
-
-.options-group .btn {
-    margin-left: auto;
 }
 
 .loading-spinner {
@@ -1396,10 +1393,128 @@ table tbody tr:hover {
     margin-top: 20px;
 }
 
+/* 상세 분석 섹션 스타일 */
+.detail-analysis-section {
+    margin-top: 30px;
+    background: #f8f9fa;
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    animation: slideInUp 0.4s ease-out;
+}
+
+.detail-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e1e8ed;
+}
+
+.detail-header h4 {
+    color: #2c3e50;
+    font-size: 1.3rem;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.detail-header i {
+    color: #667eea;
+}
+
+.detail-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.detail-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.detail-card h5 {
+    color: #2c3e50;
+    font-size: 1.1rem;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e1e8ed;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px dashed #e1e8ed;
+}
+
+.detail-row span:first-child {
+    font-size: 0.95rem;
+}
+
+.detail-row span:last-child {
+    color: #2c3e50;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.detail-formula {
+    margin-top: 15px;
+    padding: 12px;
+    background: #f0f3ff;
+    border-left: 3px solid #667eea;
+    border-radius: 6px;
+    color: #2c3e50;
+    font-size: 0.9rem;
+}
+
+.detail-formula span {
+    color: #667eea;
+    font-weight: 600;
+}
+
+.detail-result {
+    margin-top: 10px;
+    padding: 12px;
+    background: #e8f5e9;
+    border-left: 3px solid #27ae60;
+    border-radius: 6px;
+    color: #2c3e50;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.detail-result span {
+    color: #27ae60;
+}
+
+.confidence-text {
+    color: #7f8c8d;
+    font-size: 0.85rem;
+    font-weight: normal;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 @media (max-width: 768px) {
     .ethics-analyze-container,
     .ethics-dashboard-container {
         padding: 10px;
+    }
+    
+    .detail-content {
+        grid-template-columns: 1fr;
     }
     
     .ethics-analyze-header h1 {
