@@ -6,8 +6,70 @@
     <title>홈 - Community Admin</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <style>
+        .header-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+        }
+        .header-bar .logo {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1F2937;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-name {
+            color: #374151;
+            font-weight: 500;
+        }
+        .btn-header {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-login {
+            background: #3B82F6;
+            color: white;
+        }
+        .btn-login:hover {
+            background: #2563EB;
+        }
+        .btn-logout {
+            background: #EF4444;
+            color: white;
+        }
+        .btn-logout:hover {
+            background: #DC2626;
+        }
+        .container {
+            padding-top: 80px;
+        }
+    </style>
 </head>
 <body style="background-color: #F9FAFB;">
+    <div class="header-bar">
+        <div class="logo">Community Admin</div>
+        <div class="user-info" id="userInfo">
+            <span id="loadingUser">로딩 중...</span>
+        </div>
+    </div>
     <main class="container">
 <div class="hero-section">
     <img src="/static/img/sub_home.png" alt="Community Admin Logo" style="width: 400px; max-width: 90%; height: auto; margin: 0 auto 30px; display: block; filter: drop-shadow(0 10px 20px rgba(0,0,0,0.1));">
@@ -64,10 +126,63 @@
         <a href="/ethics_analyze" class="btn btn-secondary">입력하기</a>
         <a href="/ethics_dashboard" class="btn btn-secondary">기록보기</a>
     </div>
+    
+    <div class="feature-card">
+        <img src="/static/img/api-console.png" alt="Board" style="width: 64px; height: 64px; margin-bottom: 16px; object-fit: contain;">
+        <h3>게시판</h3>
+        <p>커뮤니티 게시판 및 댓글</p>
+        <a href="/board" class="btn btn-secondary">게시판 이동</a>
+    </div>
 </div>
     </main>
 
     <script src="{{ url_for('static', path='/js/app.js') }}"></script>
+<script>
+    // 사용자 정보 로드
+    async function loadUserInfo() {
+        try {
+            const response = await fetch('/api/auth/me');
+            const data = await response.json();
+            
+            const userInfoDiv = document.getElementById('userInfo');
+            
+            if (data.authenticated && data.user) {
+                userInfoDiv.innerHTML = `
+                    <span class="user-name">${data.user.username}님</span>
+                    <button class="btn-header btn-logout" onclick="logout()">로그아웃</button>
+                `;
+            } else {
+                userInfoDiv.innerHTML = `
+                    <a href="/login" class="btn-header btn-login">로그인</a>
+                    <a href="/register" class="btn-header btn-login" style="background: #6B7280;">회원가입</a>
+                `;
+            }
+        } catch (error) {
+            console.error('Failed to load user info:', error);
+            document.getElementById('userInfo').innerHTML = `
+                <a href="/login" class="btn-header btn-login">로그인</a>
+            `;
+        }
+    }
+
+    async function logout() {
+        try {
+            const response = await fetch('/api/auth/logout', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                window.location.reload();
+            }
+        } catch (error) {
+            console.error('Logout error:', error);
+            alert('로그아웃 중 오류가 발생했습니다');
+        }
+    }
+
+    // 페이지 로드 시 사용자 정보 로드
+    loadUserInfo();
+</script>
 <script>
     // Placeholder 애니메이션
     const placeholders = [

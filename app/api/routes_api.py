@@ -521,7 +521,7 @@ class EthicsAnalyzeRequest(BaseModel):
     text: str = Field(..., description="분석할 텍스트", min_length=1, max_length=1000)
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "text": "너 정말 멍청하구나"
             }

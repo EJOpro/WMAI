@@ -93,3 +93,51 @@ async def admin_rag_check(request: Request):
         {"request": request, "title": "RAG 위험도 분석"}
     )
 
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """로그인 페이지"""
+    return templates.TemplateResponse(
+        "pages/login.html",
+        {"request": request, "title": "로그인"}
+    )
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    """회원가입 페이지"""
+    return templates.TemplateResponse(
+        "pages/register.html",
+        {"request": request, "title": "회원가입"}
+    )
+
+@router.get("/board", response_class=HTMLResponse)
+async def board_list(request: Request):
+    """게시판 목록 페이지"""
+    return templates.TemplateResponse(
+        "pages/board_list.html",
+        {"request": request, "title": "게시판"}
+    )
+
+@router.get("/board/write", response_class=HTMLResponse)
+async def board_write(request: Request):
+    """게시글 작성 페이지"""
+    return templates.TemplateResponse(
+        "pages/board_write.html",
+        {"request": request, "title": "글쓰기"}
+    )
+
+@router.get("/board/{post_id}", response_class=HTMLResponse)
+async def board_detail(request: Request, post_id: int):
+    """게시글 상세 페이지"""
+    return templates.TemplateResponse(
+        "pages/board_detail.html",
+        {"request": request, "title": "게시글", "post_id": post_id}
+    )
+
+@router.get("/admin/reports", response_class=HTMLResponse)
+async def admin_reports_page(request: Request):
+    """관리자 신고 관리 페이지"""
+    return templates.TemplateResponse(
+        "pages/admin_reports.html",
+        {"request": request, "title": "관리자 - 신고 관리"}
+    )
+
