@@ -6,6 +6,7 @@
     <title>글쓰기 - Community Admin</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { background-color: #F9FAFB; }
         .header-bar {
@@ -162,6 +163,17 @@
             color: #065F46;
             border: 1px solid #6EE7B7;
         }
+        /* 로딩 스피너 애니메이션 */
+        .spinner {
+            display: inline-block;
+            margin-right: 6px;
+            font-size: 1em;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -292,8 +304,12 @@
                 return;
             }
 
+            const originalBtnText = submitBtn.textContent;
             submitBtn.disabled = true;
-            submitBtn.textContent = isEditMode ? '수정 중...' : '비윤리/스팸 분석 중...';
+            const loadingText = isEditMode 
+                ? '<i class="fas fa-spinner fa-spin"></i> 수정 중...' 
+                : '<i class="fas fa-spinner fa-spin"></i> 비윤리/스팸 분석 중...';
+            submitBtn.innerHTML = loadingText;
 
             try {
                 const url = isEditMode ? `/api/board/posts/${postId}` : '/api/board/posts';
@@ -329,7 +345,7 @@
                 showAlert('서버 오류가 발생했습니다');
             } finally {
                 submitBtn.disabled = false;
-                submitBtn.textContent = isEditMode ? '수정하기' : '작성하기';
+                submitBtn.textContent = originalBtnText;
             }
         });
 
