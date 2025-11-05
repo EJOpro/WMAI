@@ -73,13 +73,6 @@ try:
 except Exception as e:
     print(f"[WARN] 정적 파일 마운트 실패: {e}")
 
-# 이탈 분석 대시보드 정적 파일 서빙
-try:
-    app.mount("/chrun_static", StaticFiles(directory="chrun_dashboard"), name="chrun_static")
-    print("[OK] 이탈 분석 대시보드 정적 파일 마운트 완료")
-except Exception as e:
-    print(f"[WARN] 이탈 분석 대시보드 정적 파일 마운트 실패: {e}")
-
 # 라우터 등록
 try:
     from app.api import routes_public, routes_health, routes_api, routes_match, routes_auth, routes_board, routes_admin
