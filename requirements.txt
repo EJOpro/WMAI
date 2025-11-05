@@ -15,9 +15,6 @@ transformers>=4.20.0
 numpy>=1.21.0
 scikit-learn>=1.0.0
 
-# OpenAI API
-openai>=1.0.0
-
 # 데이터베이스
 pymysql>=1.1.0
 sqlalchemy>=2.0.0
@@ -32,12 +29,8 @@ loguru>=0.7.0
 # 이탈 분석 대시보드 추가 의존성
 pandas>=2.2.0
 cryptography>=41.0.7
-alembic>=1.12.1
-hiredis>=2.2.3
 python-dateutil>=2.8.2
-structlog>=23.2.0
-celery>=5.3.4
-prometheus-client>=0.19.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+
+# 벡터 데이터베이스
+chromadb>=0.4.24
 

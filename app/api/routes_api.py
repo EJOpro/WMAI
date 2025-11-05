@@ -862,6 +862,14 @@ class RiskFeedbackRequest(BaseModel):
     confirmed: bool
 
 
+class CheckNewPostRequest(BaseModel):
+    """새 게시물 위험도 체크 요청"""
+    text: str
+    user_id: str
+    post_id: str
+    created_at: str
+
+
 @router.post("/risk/feedback", tags=["risk"])
 async def submit_risk_feedback(request_data: RiskFeedbackRequest):
     """
@@ -874,9 +882,61 @@ async def submit_risk_feedback(request_data: RiskFeedbackRequest):
     - 성공 메시지
     """
     try:
-        from chrun_backend.rag_pipeline.high_risk_store import update_feedback
+        from chrun_backend.rag_pipeline.high_risk_store import update_feedback, get_chunk_by_id
         
+        # 1. 기존 SQLite 피드백 업데이트 (기존 기능 유지)
         update_feedback(request_data.chunk_id, request_data.confirmed)
+        
+        # 2. confirmed=true인 경우에만 벡터DB에 저장
+        if request_data.confirmed:
+            try:
+                # 2-1. SQLite에서 해당 chunk 정보 조회
+                chunk_data = get_chunk_by_id(request_data.chunk_id)
+                
+                if not chunk_data:
+                    # chunk를 찾을 수 없어도 기본 피드백은 성공으로 처리
+                    print(f"[WARN] 벡터DB 저장 실패: chunk_id {request_data.chunk_id}를 찾을 수 없음")
+                else:
+                    # 2-2. 임베딩 생성
+                    from chrun_backend.rag_pipeline.embedding_service import get_embedding
+                    sentence = chunk_data.get('sentence', '')
+                    
+                    if sentence.strip():
+                        embedding = get_embedding(sentence)
+                        
+                        # 2-3. 벡터DB에 저장할 메타데이터 구성
+                        from chrun_backend.rag_pipeline.vector_db import build_chunk_id
+                        
+                        # 안정적인 chunk_id 생성 (기존 chunk_id와 다를 수 있음)
+                        vector_chunk_id = build_chunk_id(sentence, chunk_data.get('post_id', ''))
+                        
+                        meta = {
+                            "chunk_id": vector_chunk_id,  # 벡터DB용 안정적 ID
+                            "original_chunk_id": chunk_data.get('chunk_id'),  # 원본 SQLite chunk_id
+                            "user_id": chunk_data.get('user_id', ''),
+                            "post_id": chunk_data.get('post_id', ''),
+                            "sentence": sentence,
+                            "risk_score": float(chunk_data.get('risk_score', 0.0)),
+                            "created_at": chunk_data.get('created_at', ''),
+                            "confirmed": True
+                        }
+                        
+                        # 2-4. 벡터DB에 upsert (idempotent)
+                        from chrun_backend.rag_pipeline.vector_db import get_client, upsert_confirmed_chunk
+                        
+                        client = get_client()  # 기본 경로 "./chroma_store" 사용
+                        upsert_confirmed_chunk(client, embedding, meta)
+                        
+                        print(f"[INFO] 확인된 위험 문장을 벡터DB에 저장 완료: {vector_chunk_id}")
+                    else:
+                        print(f"[WARN] 벡터DB 저장 실패: 빈 문장 (chunk_id: {request_data.chunk_id})")
+                        
+            except Exception as vector_error:
+                # 벡터DB 저장 실패해도 기본 피드백은 성공으로 처리
+                import traceback
+                print(f"[ERROR] 벡터DB 저장 중 오류 발생: {vector_error}")
+                traceback.print_exc()
+                # 에러 로그만 남기고 API는 성공으로 응답
         
         return {
             "status": "ok",
@@ -887,3 +947,35 @@ async def submit_risk_feedback(request_data: RiskFeedbackRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"피드백 저장 중 오류: {str(e)}")
+
+
+@router.post("/risk/check_new_post", tags=["risk"])
+async def check_new_post_risk(request_data: CheckNewPostRequest):
+    """
+    새 게시물의 위험도를 체크하여 근거 컨텍스트를 반환합니다.
+    
+    - **text**: 분석할 게시물 텍스트
+    - **user_id**: 사용자 ID
+    - **post_id**: 게시물 ID
+    - **created_at**: 생성 시간 (ISO 형식, 예: "2024-11-04T10:30:00")
+    
+    Returns:
+    - 위험도 분석을 위한 컨텍스트 (근거 문장들과 통계 정보)
+    """
+    try:
+        from chrun_backend.rag_pipeline.rag_checker import check_new_post
+        
+        # RAG 기반 위험도 체크 수행
+        context = check_new_post(
+            text=request_data.text,
+            user_id=request_data.user_id,
+            post_id=request_data.post_id,
+            created_at=request_data.created_at
+        )
+        
+        return context
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"새 게시물 위험도 체크 중 오류: {str(e)}")
