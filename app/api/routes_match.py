@@ -22,7 +22,9 @@ from match_backend.core import (
     load_reports_db,
     save_reports_db,
     update_report_status,
-    get_report_by_id
+    get_report_by_id,
+    get_reports_with_filters,
+    get_dashboard_stats
 )
 from match_backend.models import ReportRequest, ReportResponse
 
@@ -205,45 +207,107 @@ async def update_report(
 @router.get("/reports/stats")
 async def get_reports_stats():
     """
-    신고 통계 데이터
+    신고 통계 데이터 (MySQL 기반)
     
     대시보드 카드에 표시할 요약 통계
     """
     try:
-        reports = load_reports_db()
-        
-        # 상태별 통계
-        pending_count = len([r for r in reports if r.get('status') == 'pending'])
-        completed_count = len([r for r in reports if r.get('status') == 'completed'])
-        rejected_count = len([r for r in reports if r.get('status') == 'rejected'])
-        
-        # 유형별 통계
-        type_stats = {}
-        for report in reports:
-            report_type = report.get('reportType', '기타')
-            type_stats[report_type] = type_stats.get(report_type, 0) + 1
-        
-        # AI 판단별 통계
-        ai_result_stats = {}
-        for report in reports:
-            ai_result = report.get('aiAnalysis', {}).get('result', '부분일치')
-            ai_result_stats[ai_result] = ai_result_stats.get(ai_result, 0) + 1
+        stats = get_dashboard_stats()
         
         return {
             'success': True,
             'data': {
                 'status_stats': {
-                    'pending': pending_count,
-                    'completed': completed_count,
-                    'rejected': rejected_count,
-                    'total': len(reports)
+                    'pending': stats['basic_stats'].get('pending_reports', 0),
+                    'completed': stats['basic_stats'].get('completed_reports', 0),
+                    'rejected': stats['basic_stats'].get('rejected_reports', 0),
+                    'total': stats['basic_stats'].get('total_reports', 0)
                 },
-                'type_stats': type_stats,
-                'ai_result_stats': ai_result_stats,
-                'recent_reports': reports[-10:][::-1] if reports else []  # 최근 10개 (역순)
+                'type_stats': stats['type_stats'],
+                'ai_result_stats': stats['ai_stats'],
+                'daily_trends': stats['daily_trends'],
+                'avg_processing_hours': stats['avg_processing_hours']
             }
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"통계 조회 중 오류: {str(e)}")
+
+
+# ============================================
+# 📋 관리자 API - 필터링된 신고 목록
+# ============================================
+
+@router.get("/reports/filtered")
+async def get_filtered_reports(
+    status: Optional[str] = Query(None, description="상태 필터 (pending, completed, rejected)"),
+    report_type: Optional[str] = Query(None, description="신고 유형 필터"),
+    ai_result: Optional[str] = Query(None, description="AI 결과 필터 (match, partial_match, mismatch)"),
+    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    limit: int = Query(25, description="페이지 크기", ge=1, le=100),
+    offset: int = Query(0, description="오프셋", ge=0)
+):
+    """
+    필터링된 신고 목록 조회
+    
+    관리자 페이지에서 다양한 조건으로 신고를 필터링하여 조회
+    """
+    try:
+        # AI 결과 필터를 MySQL enum 형식으로 변환
+        mysql_ai_result = None
+        if ai_result:
+            ai_result_mapping = {
+                '일치': 'match',
+                '부분일치': 'partial_match',
+                '불일치': 'mismatch'
+            }
+            mysql_ai_result = ai_result_mapping.get(ai_result, ai_result)
+        
+        result = get_reports_with_filters(
+            status_filter=status,
+            type_filter=report_type,
+            ai_result_filter=mysql_ai_result,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            offset=offset
+        )
+        
+        return {
+            'success': True,
+            'data': result['reports'],
+            'pagination': {
+                'total': result['total'],
+                'limit': result['limit'],
+                'offset': result['offset'],
+                'has_more': result['offset'] + result['limit'] < result['total']
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"필터링된 신고 조회 중 오류: {str(e)}")
+
+
+# ============================================
+# 📊 관리자 API - 대시보드 통계
+# ============================================
+
+@router.get("/dashboard/stats")
+async def get_dashboard_statistics():
+    """
+    관리자 대시보드용 상세 통계
+    
+    차트와 지표에 사용할 상세한 통계 데이터
+    """
+    try:
+        stats = get_dashboard_stats()
+        
+        return {
+            'success': True,
+            'data': stats
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"대시보드 통계 조회 중 오류: {str(e)}")
 
