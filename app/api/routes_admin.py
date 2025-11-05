@@ -186,6 +186,101 @@ async def process_report(request: Request, report_id: int, data: ReportProcessRe
     }
 
 
+@router.get("/admin/reports/{report_id}/detail")
+async def get_report_detail(request: Request, report_id: int):
+    """
+    신고 상세 정보 조회 (관리자 전용)
+    
+    Args:
+        report_id: 신고 ID
+    
+    Returns:
+        신고 상세 정보 + AI 분석 결과
+    """
+    require_admin(request)
+    
+    # 신고 정보 조회
+    report = execute_query("""
+        SELECT 
+            r.id,
+            r.report_type,
+            r.board_id,
+            r.comment_id,
+            r.report_reason,
+            r.report_detail,
+            r.reported_content,
+            r.status,
+            r.priority,
+            r.created_at,
+            r.processed_date,
+            r.processing_note,
+            r.post_action,
+            reporter.id as reporter_id,
+            reporter.username as reporter_name,
+            b.title as board_title,
+            b.content as board_content,
+            b.category as board_category,
+            b.created_at as board_created_at,
+            b.status as board_status,
+            b.user_id as board_author_id,
+            board_author.username as board_author_name,
+            c.content as comment_content,
+            c.board_id as comment_board_id,
+            c.created_at as comment_created_at,
+            c.status as comment_status,
+            c.user_id as comment_author_id,
+            comment_author.username as comment_author_name
+        FROM report r
+        LEFT JOIN users reporter ON r.reporter_id = reporter.id
+        LEFT JOIN board b ON r.board_id = b.id
+        LEFT JOIN users board_author ON b.user_id = board_author.id
+        LEFT JOIN comment c ON r.comment_id = c.id
+        LEFT JOIN users comment_author ON c.user_id = comment_author.id
+        WHERE r.id = %s
+    """, (report_id,), fetch_one=True)
+    
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="신고를 찾을 수 없습니다"
+        )
+    
+    # AI 분석 결과 조회
+    analysis = execute_query("""
+        SELECT 
+            id,
+            result,
+            confidence,
+            analysis,
+            created_at
+        FROM report_analysis
+        WHERE report_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, (report_id,), fetch_one=True)
+    
+    # 결과 타입을 한글로 변환
+    result_map = {
+        'match': '일치',
+        'partial_match': '부분일치',
+        'mismatch': '불일치'
+    }
+    
+    return {
+        'success': True,
+        'report': report,
+        'has_analysis': bool(analysis),
+        'analysis': {
+            'id': analysis['id'],
+            'result': analysis['result'],
+            'result_text': result_map.get(analysis['result'], analysis['result']),
+            'confidence': analysis['confidence'],
+            'analysis': analysis['analysis'],
+            'created_at': analysis['created_at'].isoformat() if analysis['created_at'] else None
+        } if analysis else None
+    }
+
+
 @router.get("/admin/reports/{report_id}/analysis")
 async def get_report_analysis(request: Request, report_id: int):
     """

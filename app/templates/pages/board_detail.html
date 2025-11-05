@@ -139,7 +139,7 @@
             padding: 10px 20px;
             border-radius: 6px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 500;
             cursor: pointer;
             border: none;
             text-decoration: none;
@@ -191,7 +191,7 @@
             padding: 12px;
             border: 1px solid #D1D5DB;
             border-radius: 6px;
-            font-size: 14px;
+            font-size: 15px;
             box-sizing: border-box;
             resize: vertical;
             font-family: inherit;
@@ -251,6 +251,7 @@
             background: none;
             border: none;
             padding: 0;
+            font-size: 14px;
         }
         .comment-action-btn:hover {
             color: #3B82F6;
@@ -348,6 +349,17 @@
         }
         .btn-outline:hover {
             background: #FEF2F2;
+        }
+        /* 로딩 스피너 애니메이션 */
+        .spinner {
+            display: inline-block;
+            margin-right: 6px;
+            font-size: 1em;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -570,7 +582,7 @@
             
             if (submitBtn) {
                 submitBtn.disabled = true;
-                submitBtn.textContent = '비윤리/스팸 분석 중...';
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 비윤리/스팸 분석 중...';
             }
 
             try {

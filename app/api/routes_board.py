@@ -64,7 +64,11 @@ def should_block_content(result: dict) -> Tuple[bool, str]:
     if final_score >= 80 and final_confidence >= 80:
         return True, "부적절한 내용이 포함되어 있습니다"
     
-    # 차단 기준 2: 스팸 점수 >= 70 AND 신뢰도 >= 70
+    # 차단 기준 2: 비윤리 점수 >= 90 AND 신뢰도 >= 70
+    if final_score >= 90 and final_confidence >= 70:
+        return True, "부적절한 내용이 포함되어 있습니다"
+    
+    # 차단 기준 3: 스팸 점수 >= 70 AND 신뢰도 >= 70
     if spam_score >= 70 and spam_confidence >= 70:
         return True, "스팸으로 의심되는 내용이 포함되어 있습니다"
     
@@ -272,8 +276,8 @@ def analyze_and_process_report(report_id: int, content: str, reason: str, target
                     (target_id,)
                 )
             
-            # processing_note에 분석 결과 포함
-            processing_note = f"AI 자동 처리 (점수: {score}): 신고 내용과 일치하여 콘텐츠 차단\n\n[AI 분석 내용]\n{analysis}"
+            # processing_note (AI 분석 내용 제외)
+            processing_note = f"AI 자동 처리 (점수: {score}): 신고 내용과 일치하여 콘텐츠 차단"
             execute_query("""
                 UPDATE report 
                 SET status = 'completed', 
@@ -286,7 +290,7 @@ def analyze_and_process_report(report_id: int, content: str, reason: str, target
             
         elif score <= 29:
             # 불일치: 신고 거부, 게시글/댓글 유지
-            processing_note = f"AI 자동 처리 (점수: {score}): 신고 내용과 불일치하여 거부\n\n[AI 분석 내용]\n{analysis}"
+            processing_note = f"AI 자동 처리 (점수: {score}): 신고 내용과 불일치하여 거부"
             execute_query("""
                 UPDATE report 
                 SET status = 'rejected',
@@ -299,7 +303,7 @@ def analyze_and_process_report(report_id: int, content: str, reason: str, target
             
         else:
             # 부분일치: pending 상태 유지, 관리자 검토 필요
-            processing_note = f"AI 분석 완료 (점수: {score}): 부분일치로 관리자 검토 필요\n\n[AI 분석 내용]\n{analysis}"
+            processing_note = f"AI 분석 완료 (점수: {score}): 부분일치로 관리자 검토 필요"
             execute_query("""
                 UPDATE report 
                 SET processing_note = %s
