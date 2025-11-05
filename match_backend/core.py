@@ -330,6 +330,61 @@ def save_report_to_db(post_content: str, reason: str, ai_result: Dict) -> Dict:
         raise Exception(f"데이터베이스 저장 오류: {str(e)}")
 
 
+def save_analysis_only_to_db(ai_result: Dict) -> Dict:
+    """
+    AI 분석 결과만 report_analysis 테이블에 저장 (테스트용)
+    
+    Args:
+        ai_result: AI 분석 결과
+        
+    Returns:
+        저장된 분석 데이터
+    """
+    try:
+        if not ai_result:
+            raise Exception("AI 분석 결과가 없습니다")
+            
+        result_type = ai_result.get('type', '부분일치')
+        confidence = ai_result.get('score', 50)
+        
+        # result 값을 MySQL enum에 맞게 변환
+        mysql_result = {
+            '일치': 'match',
+            '부분일치': 'partial_match', 
+            '불일치': 'mismatch'
+        }.get(result_type, 'partial_match')
+        
+        # report_analysis 테이블에만 저장 (report_id는 NULL)
+        insert_analysis_query = """
+        INSERT INTO report_analysis (report_id, result, confidence, analysis)
+        VALUES (%s, %s, %s, %s)
+        """
+        
+        analysis_params = (
+            None,  # report_id는 NULL (테스트 분석)
+            mysql_result,
+            confidence,
+            ai_result.get('analysis', '')
+        )
+        
+        analysis_id = db_manager.execute_insert(insert_analysis_query, analysis_params)
+        
+        # 테스트용 응답 데이터 반환
+        return {
+            'id': analysis_id,
+            'reportDate': datetime.now().isoformat(),
+            'status': 'test_analysis',
+            'aiAnalysis': {
+                'result': result_type,
+                'confidence': confidence,
+                'analysis': ai_result.get('analysis', '')
+            }
+        }
+        
+    except Exception as e:
+        raise Exception(f"분석 데이터 저장 오류: {str(e)}")
+
+
 def update_report_status(report_id: int, status: str, processing_note: Optional[str] = None) -> Dict:
     """
     신고 상태 업데이트

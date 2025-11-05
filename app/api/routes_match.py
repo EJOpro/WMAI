@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from match_backend.core import (
     analyze_with_ai,
     save_report_to_db,
+    save_analysis_only_to_db,
     load_reports_db,
     save_reports_db,
     update_report_status,
@@ -37,11 +38,10 @@ router = APIRouter(tags=["wmaa"])
 @router.post("/analyze", response_model=ReportResponse)
 async def analyze_report(report: ReportRequest):
     """
-    신고 내용 AI 분석
+    신고 내용 AI 분석 (테스트용)
     
     - OpenAI GPT-4o-mini를 사용하여 게시글과 신고 내용의 일치 여부 분석
-    - 일치/불일치/부분일치로 판단
-    - 결과를 DB에 자동 저장
+    - 분석 결과만 저장 (실제 신고 데이터는 저장하지 않음)
     """
     try:
         # API 키 확인
@@ -55,20 +55,20 @@ async def analyze_report(report: ReportRequest):
         # AI 분석 수행
         result = analyze_with_ai(report.post_content, report.reason)
         
-        # 데이터베이스에 저장
-        saved_report = save_report_to_db(report.post_content, report.reason, result)
+        # 분석 결과만 저장 (테스트용)
+        saved_analysis = save_analysis_only_to_db(result)
         
         return ReportResponse(
-            id=saved_report['id'],
+            id=saved_analysis['id'],
             post_content=report.post_content,
             reason=report.reason,
             result_type=result['type'],
             score=result['score'],
             analysis=result['analysis'],
             css_class=result['css_class'],
-            timestamp=saved_report['reportDate'],
-            status=saved_report['status'],
-            post_action=saved_report.get('postAction')
+            timestamp=saved_analysis['reportDate'],
+            status='test_analysis',  # 테스트 분석임을 표시
+            post_action='테스트 분석 완료'
         )
         
     except Exception as e:
