@@ -10,6 +10,9 @@ let charts = {};
 // DOM 로드 완료 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
+    
+    // 부분일치 신고 확인을 위한 디버그 로그
+    console.log('관리자 페이지 로드됨 - 부분일치 신고 처리 기능 활성화');
 });
 
 // 앱 초기화
@@ -27,104 +30,31 @@ function loadDataFromServer() {
             if (data.success) {
                 reportsData = data.data;
                 filteredReports = [...reportsData];
+                
+                // AI 분석 결과가 있는 신고들을 로그로 출력
+                console.log('로드된 신고 데이터:', reportsData.length + '개');
+                reportsData.forEach(report => {
+                    if (report.aiAnalysis && report.aiAnalysis.result) {
+                        console.log(`신고 ID ${report.id}: AI 결과="${report.aiAnalysis.result}"`);
+                    } else {
+                        console.log(`신고 ID ${report.id}: AI 분석 결과 없음`);
+                    }
+                });
+                
                 renderDashboard();
                 renderReportsList();
                 updateFilterCounts();
+            } else {
+                console.error('서버 응답 오류:', data);
+                showAlert('데이터를 불러올 수 없습니다.', 'danger');
             }
         })
         .catch(error => {
             console.error('데이터 로드 오류:', error);
-            loadDummyData(); // 오류 시 더미 데이터 사용
+            showAlert('서버 연결에 실패했습니다.', 'danger');
         });
 }
 
-// 더미 데이터 로드 (백업용 - 일치/부분일치/불일치 포함)
-function loadDummyData() {
-    reportsData = [
-        {
-            id: 1,
-            reportDate: '2025-10-16 18:30:45',
-            reportType: '욕설 및 비방',
-            reportedContent: '이런 바보 같은 정책은 누가 만든 거야? 정말 머리가 없는 것 같다.',
-            reportReason: '욕설 및 비방',
-            reporterId: 'user123',
-            aiAnalysis: {
-                result: '일치',
-                confidence: 92,
-                analysis: '게시글에 "바보", "머리가 없는" 등의 비방성 표현이 명확히 포함되어 있습니다.'
-            },
-            status: 'completed',
-            priority: 'high',
-            assignedTo: 'AI_System',
-            processedDate: '2025-10-16 18:30:50',
-            processingNote: 'AI 자동 처리: 신고 내용과 일치하여 게시글 삭제',
-            postStatus: 'deleted',
-            postAction: '게시글이 자동 삭제되었습니다.'
-        },
-        {
-            id: 2,
-            reportDate: '2025-10-16 17:22:33',
-            reportType: '저작권 침해',
-            reportedContent: '유명 작가의 소설 일부를 인용합니다. "삶이란 무엇인가..." (출처: XX작가, XX소설)',
-            reportReason: '저작권 침해',
-            reporterId: 'user101',
-            aiAnalysis: {
-                result: '부분일치',
-                confidence: 65,
-                analysis: '저작물 인용이 있으나 출처가 명시되어 있어 부분적으로만 문제가 될 수 있습니다.'
-            },
-            status: 'pending',
-            priority: 'medium',
-            assignedTo: null,
-            processedDate: null,
-            processingNote: null,
-            postStatus: 'pending_review',
-            postAction: null
-        },
-        {
-            id: 3,
-            reportDate: '2025-10-16 16:15:20',
-            reportType: '욕설 및 비방',
-            reportedContent: '오늘 날씨가 정말 좋네요. 공원에서 산책하면서 좋은 시간을 보냈습니다.',
-            reportReason: '욕설 및 비방',
-            reporterId: 'user789',
-            aiAnalysis: {
-                result: '불일치',
-                confidence: 95,
-                analysis: '게시글은 단순한 일상 공유 내용으로 욕설이나 비방 요소가 전혀 없습니다.'
-            },
-            status: 'rejected',
-            priority: 'low',
-            assignedTo: 'AI_System',
-            processedDate: '2025-10-16 16:15:25',
-            processingNote: 'AI 자동 처리: 신고 내용과 불일치하여 게시글 유지',
-            postStatus: 'maintained',
-            postAction: '게시글이 자동 유지되었습니다.'
-        },
-        {
-            id: 4,
-            reportDate: '2025-10-16 15:10:11',
-            reportType: '도배 및 광고',
-            reportedContent: '이 제품 정말 좋아요~ 친구들한테도 추천했는데 다들 만족해합니다. 혹시 관심있으시면 연락주세요.',
-            reportReason: '도배 및 광고',
-            reporterId: 'user202',
-            aiAnalysis: {
-                result: '부분일치',
-                confidence: 72,
-                analysis: '제품 추천 내용이 포함되어 있으나 명시적인 광고나 판매 의도는 불분명합니다.'
-            },
-            status: 'pending',
-            priority: 'medium',
-            assignedTo: null,
-            processedDate: null,
-            processingNote: null,
-            postStatus: 'pending_review',
-            postAction: null
-        }
-    ];
-    
-    filteredReports = [...reportsData];
-}
 
 // 이벤트 리스너 설정
 function setupEventListeners() {
@@ -144,6 +74,7 @@ function setupEventListeners() {
     
     // AI 분석 결과 필터
     document.getElementById('aiResultFilter').addEventListener('change', function() {
+        console.log(`AI 결과 필터 변경됨: "${this.value}"`);
         const partialMatchSubFilter = document.getElementById('partialMatchSubFilter');
         if (this.value === '부분일치') {
             partialMatchSubFilter.style.display = 'block';
@@ -455,6 +386,9 @@ function updateFilterCounts() {
 
 // 필터 적용
 function applyFilters() {
+    const aiResultFilter = document.getElementById('aiResultFilter').value;
+    console.log(`필터 적용 시작 - AI 결과 필터: "${aiResultFilter}", 전체 신고 수: ${reportsData.length}`);
+    
     filteredReports = reportsData.filter(report => {
         // 상태 필터
         const statusFilters = {
@@ -478,8 +412,21 @@ function applyFilters() {
         // AI 분석 결과 필터
         const aiResultFilter = document.getElementById('aiResultFilter').value;
         if (aiResultFilter !== 'all') {
-            const aiResult = report.aiAnalysis ? report.aiAnalysis.result : '부분일치';
-            if (aiResult !== aiResultFilter) return false;
+            // AI 분석 결과가 없는 신고는 필터에서 제외
+            if (!report.aiAnalysis || !report.aiAnalysis.result) {
+                console.log(`신고 ID ${report.id}: AI 분석 결과 없음`);
+                return false;
+            }
+            
+            const aiResult = report.aiAnalysis.result;
+            // 디버깅을 위한 로그
+            console.log(`신고 ID ${report.id}: AI 결과="${aiResult}", 필터="${aiResultFilter}"`);
+            
+            // 필터 값과 AI 결과 값이 정확히 일치하는지 확인 (공백 제거 후 비교)
+            if (aiResult.trim() !== aiResultFilter.trim()) {
+                console.log(`신고 ID ${report.id}: AI 결과 불일치로 필터링됨`);
+                return false;
+            }
             
             // 부분일치인 경우 서브필터 적용
             if (aiResultFilter === '부분일치') {
@@ -510,6 +457,8 @@ function applyFilters() {
         
         return true;
     });
+    
+    console.log(`필터 적용 완료 - 필터링된 신고 수: ${filteredReports.length}`);
     
     currentPage = 1;
     applySorting();
@@ -590,15 +539,25 @@ function renderReportsList() {
                         <h6 class="card-title">신고된 내용</h6>
                         <p class="card-text">${truncateText(report.reportedContent, 150)}</p>
                         
-                        <div class="ai-result ${getAiResultClass(report.aiAnalysis.result)}">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <strong>AI 분석 결과: ${report.aiAnalysis.result}</strong>
-                                <span class="confidence-score ${getConfidenceClass(report.aiAnalysis.confidence)}">
-                                    ${report.aiAnalysis.confidence}%
-                                </span>
+                        ${report.aiAnalysis ? `
+                            <div class="ai-result ${getAiResultClass(report.aiAnalysis.result)}">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <strong>AI 분석 결과: ${report.aiAnalysis.result}</strong>
+                                    <span class="confidence-score ${getConfidenceClass(report.aiAnalysis.confidence)}">
+                                        ${report.aiAnalysis.confidence}%
+                                    </span>
+                                </div>
+                                <small>${report.aiAnalysis.analysis}</small>
                             </div>
-                            <small>${report.aiAnalysis.analysis}</small>
-                        </div>
+                        ` : `
+                            <div class="ai-result partial">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <strong>AI 분석 결과: 분석 중</strong>
+                                    <span class="confidence-score confidence-low">-</span>
+                                </div>
+                                <small>AI 분석이 진행 중입니다.</small>
+                            </div>
+                        `}
                     </div>
                     <div class="col-md-4">
                         <div class="mb-2">
@@ -628,7 +587,7 @@ function renderReportsList() {
                             <button class="btn btn-sm btn-outline-primary" onclick="viewReportDetail(${report.id})">
                                 <i class="fas fa-eye"></i> 상세보기
                             </button>
-                            ${report.aiAnalysis.result === '부분일치' && report.status === 'pending' ? `
+                            ${report.aiAnalysis && report.aiAnalysis.result === '부분일치' && report.status === 'pending' ? `
                                 <button class="btn btn-sm btn-success" onclick="processReport(${report.id}, 'approve')">
                                     <i class="fas fa-check"></i> 승인
                                 </button>
@@ -735,33 +694,63 @@ function viewReportDetail(reportId) {
         <hr>
         
         <h6>AI 분석 결과</h6>
-        <div class="ai-result ${getAiResultClass(report.aiAnalysis.result)}">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <strong>판단 결과: ${report.aiAnalysis.result}</strong>
-                <span class="confidence-score ${getConfidenceClass(report.aiAnalysis.confidence)}">
-                    신뢰도: ${report.aiAnalysis.confidence}%
-                </span>
+        ${report.aiAnalysis ? `
+            <div class="ai-result ${getAiResultClass(report.aiAnalysis.result)}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>판단 결과: ${report.aiAnalysis.result}</strong>
+                    <span class="confidence-score ${getConfidenceClass(report.aiAnalysis.confidence)}">
+                        신뢰도: ${report.aiAnalysis.confidence}%
+                    </span>
+                </div>
+                <p class="mb-0">${report.aiAnalysis.analysis}</p>
             </div>
-            <p class="mb-0">${report.aiAnalysis.analysis}</p>
-        </div>
+        ` : `
+            <div class="ai-result partial">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>판단 결과: 분석 중</strong>
+                    <span class="confidence-score confidence-low">신뢰도: -</span>
+                </div>
+                <p class="mb-0">AI 분석이 진행 중입니다.</p>
+            </div>
+        `}
     `;
     
     // 모달 버튼 설정 (부분일치만 승인/반려 가능)
     const approveBtn = document.getElementById('approveReport');
     const rejectBtn = document.getElementById('rejectReport');
     
-    if (report.aiAnalysis.result === '부분일치' && report.status === 'pending') {
+    if (report.aiAnalysis && report.aiAnalysis.result === '부분일치' && report.status === 'pending') {
         approveBtn.style.display = 'inline-block';
         rejectBtn.style.display = 'inline-block';
-        approveBtn.onclick = () => processReport(reportId, 'approve');
-        rejectBtn.onclick = () => processReport(reportId, 'reject');
+        
+        // 기존 이벤트 리스너 제거 후 새로 추가
+        approveBtn.replaceWith(approveBtn.cloneNode(true));
+        rejectBtn.replaceWith(rejectBtn.cloneNode(true));
+        
+        const newApproveBtn = document.getElementById('approveReport');
+        const newRejectBtn = document.getElementById('rejectReport');
+        
+        newApproveBtn.onclick = () => {
+            processReport(reportId, 'approve');
+        };
+        newRejectBtn.onclick = () => {
+            processReport(reportId, 'reject');
+        };
     } else {
         approveBtn.style.display = 'none';
         rejectBtn.style.display = 'none';
     }
     
     // 모달 표시
-    const modal = document.getElementById('reportDetailModal')._modalInstance;
+    const modalElement = document.getElementById('reportDetailModal');
+    let modal = modalElement._modalInstance;
+    
+    if (!modal) {
+        // Bootstrap 모달 인스턴스가 없으면 새로 생성
+        modal = new bootstrap.Modal(modalElement);
+        modalElement._modalInstance = modal;
+    }
+    
     modal.show();
 }
 
@@ -790,6 +779,15 @@ function processReport(reportId, action) {
                 const updatedReport = data.data;
                 Object.assign(report, updatedReport);
                 
+                // 승인/반려에 따른 게시글 처리 상태 업데이트
+                if (action === 'approve') {
+                    report.postStatus = 'deleted';
+                    report.postAction = '게시글이 삭제되었습니다.';
+                } else if (action === 'reject') {
+                    report.postStatus = 'approved';
+                    report.postAction = '게시글이 유지됩니다.';
+                }
+                
                 // UI 업데이트
                 applyFilters();
                 renderDashboard();
@@ -804,7 +802,8 @@ function processReport(reportId, action) {
                 showAlert(`신고가 ${actionText} 처리되었습니다.${postMessage}`, 'success');
                 
                 // 모달이 열려있다면 닫기
-                const modal = document.getElementById('reportDetailModal')._modalInstance;
+                const modalElement = document.getElementById('reportDetailModal');
+                const modal = modalElement._modalInstance;
                 if (modal) modal.hide();
             } else {
                 showAlert('처리 중 오류가 발생했습니다.', 'danger');
