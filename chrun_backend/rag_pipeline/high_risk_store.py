@@ -196,6 +196,45 @@ def update_feedback(chunk_id: str, confirmed: bool) -> None:
     else:
         print(f"[WARN] 로컬 테스트용 chunk_id를 찾을 수 없음: {chunk_id}")
 
+def get_chunk_by_id(chunk_id: str) -> Dict[str, Any]:
+    """
+    특정 chunk_id로 레코드를 조회하여 벡터DB 저장에 필요한 정보를 반환
+    
+    Args:
+        chunk_id (str): 조회할 chunk ID
+        
+    Returns:
+        Dict[str, Any]: chunk 정보 (없으면 빈 dict)
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT chunk_id, user_id, post_id, sentence, risk_score, created_at, confirmed
+        FROM high_risk_chunks 
+        WHERE chunk_id = ?
+    ''', (chunk_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        result = {
+            'chunk_id': row['chunk_id'],
+            'user_id': row['user_id'],
+            'post_id': row['post_id'],
+            'sentence': row['sentence'],
+            'risk_score': row['risk_score'],
+            'created_at': row['created_at'],
+            'confirmed': bool(row['confirmed'])
+        }
+        print(f"[INFO] chunk 조회 완료: {chunk_id}")
+        return result
+    else:
+        print(f"[WARN] chunk를 찾을 수 없음: {chunk_id}")
+        return {}
+
 def save_high_risk_chunk(chunk_dict: Dict[str, Any]) -> None:
     """
     일단 지금은 안 써도 되지만, risk_scorer에서 쓸 수 있게 남겨둠

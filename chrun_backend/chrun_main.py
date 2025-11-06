@@ -31,6 +31,21 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
+# FastAPI 앱 생성
+app = FastAPI(title="Churn Analysis API", version="1.0.0")
+
+# CORS 설정
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 로컬 테스트용
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Router를 앱에 포함
+app.include_router(router)
+
 # 데이터베이스 초기화는 메인 앱에서 처리
 
 # Redis 연결 (환경 변수 기반)
@@ -108,6 +123,23 @@ async def health_check():
 async def get_data_status(db: Session = Depends(get_db)):
     """데이터베이스 데이터 상태 확인"""
     try:
+        # 테이블 존재 여부 확인 (MySQL의 경우)
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        
+        if 'events' not in tables:
+            # 테이블이 없으면 빈 데이터 반환
+            return {
+                "has_data": False,
+                "total_events": 0,
+                "unique_users": 0,
+                "latest_date": None,
+                "oldest_date": None,
+                "data_range_months": None,
+                "error": "events 테이블이 존재하지 않습니다"
+            }
+        
         # 총 이벤트 수
         total_events = db.query(Event).count()
         
@@ -133,7 +165,20 @@ async def get_data_status(db: Session = Depends(get_db)):
             )
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"데이터 상태 확인 실패: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"[ERROR] 데이터 상태 확인 실패: {str(e)}")
+        print(f"[ERROR] 상세 오류:\n{error_detail}")
+        # 오류가 발생해도 빈 데이터로 반환하여 프론트엔드가 계속 동작하도록 함
+        return {
+            "has_data": False,
+            "total_events": 0,
+            "unique_users": 0,
+            "latest_date": None,
+            "oldest_date": None,
+            "data_range_months": None,
+            "error": str(e)
+        }
 
 @router.delete("/events/clear")
 async def clear_events(db: Session = Depends(get_db)):
@@ -272,11 +317,23 @@ async def get_metrics(
 async def get_segment_analysis(
     start_month: str,
     end_month: str,
+    channel: bool = False,
+    action_type: bool = False,
+    weekday_pattern: bool = False,
+    time_pattern: bool = False,
     db: Session = Depends(get_db)
 ):
     """세그먼트별 이탈률 분석"""
     
-    cache_key = f"segments:{start_month}:{end_month}"
+    # 세그먼트 설정 구성
+    segments_config = {
+        "channel": channel,
+        "action_type": action_type,
+        "weekday_pattern": weekday_pattern,
+        "time_pattern": time_pattern
+    }
+    
+    cache_key = f"segments:{start_month}:{end_month}:{':'.join([f'{k}:{v}' for k, v in sorted(segments_config.items())])}"
     
     # 캐시된 결과 확인 (Redis가 있을 때만)
     if redis_client:
@@ -289,7 +346,7 @@ async def get_segment_analysis(
     
     try:
         analyzer = ChurnAnalyzer(db)
-        segments = analyzer.get_segment_analysis(start_month, end_month)
+        segments = analyzer.get_segment_analysis(start_month, end_month, segments_config)
         
         # 캐시 저장 (1시간) - Redis가 있을 때만
         if redis_client:
@@ -332,6 +389,7 @@ async def get_churn_trends(
 
 @router.get("/users/inactive")
 async def get_inactive_users(
+    month: str = None,
     days: int = 90,
     limit: int = 100,
     db: Session = Depends(get_db)
@@ -339,7 +397,17 @@ async def get_inactive_users(
     """장기 미접속 사용자 목록"""
     
     try:
-        cutoff_date = datetime.now() - timedelta(days=days)
+        # 월이 지정되면 해당 월의 마지막 날 기준, 없으면 현재 날짜 기준
+        if month:
+            from calendar import monthrange
+            year, month_num = map(int, month.split('-'))
+            last_day = monthrange(year, month_num)[1]
+            month_end = f"{month}-{last_day:02d}"
+            cutoff_date = datetime.strptime(month_end, "%Y-%m-%d") - timedelta(days=days)
+            reference_date = datetime.strptime(month_end, "%Y-%m-%d")
+        else:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            reference_date = datetime.now()
         
         # 서브쿼리로 각 사용자의 마지막 활동일 계산
         subquery = db.query(
@@ -350,20 +418,28 @@ async def get_inactive_users(
         # 장기 미접속 사용자 조회
         inactive_users = db.query(subquery).filter(
             subquery.c.last_activity < cutoff_date
-        ).limit(limit).all()
+        ).order_by(subquery.c.last_activity.asc()).limit(limit).all()
         
         result = [
             {
                 "user_hash": user.user_hash,
-                "last_activity": user.last_activity,
-                "inactive_days": (datetime.now() - user.last_activity).days
+                "last_activity": user.last_activity.isoformat() if isinstance(user.last_activity, datetime) else str(user.last_activity),
+                "inactive_days": (reference_date - user.last_activity).days if isinstance(user.last_activity, datetime) else 0
             }
             for user in inactive_users
         ]
         
-        return {"inactive_users": result, "total_count": len(result)}
+        return {
+            "inactive_users": result, 
+            "total_count": len(result),
+            "reference_month": month,
+            "cutoff_date": cutoff_date.isoformat(),
+            "days": days
+        }
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/reports/summary/{month}")
@@ -461,4 +537,10 @@ async def save_analysis_result(result: dict, db: Session):
 
 if __name__ == "__main__":
     import uvicorn
+    # 데이터베이스 초기화
+    print("[INFO] 데이터베이스 초기화 중...")
+    init_db()
+    print("[INFO] 이탈률 분석 서버 시작 중...")
+    print("[INFO] http://localhost:8000 에서 API 서버 실행")
+    print("[INFO] API 문서: http://localhost:8000/docs")
     uvicorn.run(app, host="0.0.0.0", port=8000)

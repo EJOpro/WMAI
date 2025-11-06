@@ -5,6 +5,7 @@ import os
 import json
 from typing import Dict, List, Optional
 from datetime import datetime
+from decimal import Decimal
 import openai
 from openai import OpenAI
 import logging
@@ -64,18 +65,26 @@ class LLMInsightGenerator:
         Returns:
             Dict containing 'insights' and 'actions' lists
         """
+        print(f"[DEBUG] LLM generate_insights_and_actions 호출됨")
+        print(f"[DEBUG] OpenAI 클라이언트 상태: {'초기화됨' if self.client else '초기화되지 않음'}")
+        
         if not self.client:
             logger.warning("OpenAI 클라이언트가 초기화되지 않았습니다. 기본 인사이트를 반환합니다.")
+            print("[WARNING] OpenAI 클라이언트가 없습니다. Fallback 인사이트 생성 중...")
             return self._generate_fallback_insights(analysis_data)
         
         try:
+            print("[INFO] LLM 인사이트 생성 시작 - 데이터 요약 생성 중...")
             # 데이터 요약 생성
             data_summary = self._create_data_summary(analysis_data)
+            print(f"[INFO] 데이터 요약 생성 완료 - 세그먼트: {len(data_summary.get('세그먼트_분석', {}))}개")
             
             # LLM 프롬프트 생성
             prompt = self._create_analysis_prompt(data_summary)
+            print(f"[INFO] 프롬프트 생성 완료 - 길이: {len(prompt)}자")
             
             # OpenAI API 호출
+            print("[INFO] OpenAI API 호출 중...")
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",  # 비용 효율적인 모델 사용
                 messages=[
@@ -94,7 +103,9 @@ class LLMInsightGenerator:
             )
             
             # 응답 파싱
+            print("[INFO] OpenAI API 응답 수신 - 파싱 중...")
             result = json.loads(response.choices[0].message.content)
+            print(f"[INFO] 파싱 완료 - insights: {len(result.get('insights', []))}개, actions: {len(result.get('actions', []))}개")
             
             # 결과 검증 및 정제
             insights = result.get('insights', [])[:3]  # 최대 3개
@@ -104,6 +115,7 @@ class LLMInsightGenerator:
             insights = self._filter_and_validate_responses(insights, 'insights')
             actions = self._filter_and_validate_responses(actions, 'actions')
             
+            print(f"[INFO] 필터링 완료 - 최종 insights: {len(insights)}개, actions: {len(actions)}개")
             logger.info(f"LLM 인사이트 생성 완료: {len(insights)}개 인사이트, {len(actions)}개 액션")
             
             return {
@@ -127,7 +139,7 @@ class LLMInsightGenerator:
 2. 인사이트는 데이터에서 발견된 중요한 패턴이나 트렌드를 설명
 3. 권장 액션은 구체적이고 실행 가능한 개선 방안을 제시
 4. 각각 최대 3개까지만 제공
-5. 한국어로 작성
+5. 한국어로 작성하며, 반드시 존댓말을 사용하세요
 6. 데이터가 부족하거나 불확실한 경우 "Uncertain" 표기
 7. 통계적으로 의미 있는 차이(5%p 이상)만 언급
 
@@ -149,6 +161,20 @@ class LLMInsightGenerator:
 - 통계적으로 유의미하지 않은 차이를 과장하여 설명 금지
 - 불확실한 데이터를 확실한 것처럼 표현 금지"""
 
+    def _convert_decimal(self, value):
+        """Decimal 타입을 JSON 직렬화 가능한 타입으로 변환"""
+        if isinstance(value, Decimal):
+            return float(value)
+        elif isinstance(value, (int, float)):
+            return value
+        elif value is None:
+            return 0
+        else:
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return value
+    
     def _create_data_summary(self, analysis_data: Dict) -> Dict:
         """분석 데이터를 LLM이 이해하기 쉬운 형태로 요약"""
         
@@ -162,11 +188,16 @@ class LLMInsightGenerator:
         
         # 기본 지표 요약
         metrics = analysis_data.get('metrics', {})
+        churn_rate = self._convert_decimal(metrics.get('churn_rate', 0))
+        active_users = int(self._convert_decimal(metrics.get('active_users', 0)))
+        reactivated_users = int(self._convert_decimal(metrics.get('reactivated_users', 0)))
+        long_term_inactive = int(self._convert_decimal(metrics.get('long_term_inactive', 0)))
+        
         summary["기본_지표"] = {
-            "전체_이탈률": f"{metrics.get('churn_rate', 0):.1f}%",
-            "활성_사용자": metrics.get('active_users', 0),
-            "재활성_사용자": metrics.get('reactivated_users', 0),
-            "장기_미접속": metrics.get('long_term_inactive', 0),
+            "전체_이탈률": f"{churn_rate:.1f}%",
+            "활성_사용자": active_users,
+            "재활성_사용자": reactivated_users,
+            "장기_미접속": long_term_inactive,
             "분석_기간": f"{analysis_data.get('start_month', 'N/A')} ~ {analysis_data.get('end_month', 'N/A')}"
         }
         
@@ -191,10 +222,12 @@ class LLMInsightGenerator:
             if segment_data and selected_segments.get(segment_type, False):
                 segment_summary = []
                 for item in segment_data:
+                    item_churn_rate = self._convert_decimal(item.get('churn_rate', 0))
+                    item_active = int(self._convert_decimal(item.get('current_active', 0)))
                     segment_summary.append({
                         "그룹": item.get('segment_value', 'Unknown'),
-                        "이탈률": f"{item.get('churn_rate', 0):.1f}%",
-                        "활성사용자": item.get('current_active', 0),
+                        "이탈률": f"{item_churn_rate:.1f}%",
+                        "활성사용자": item_active,
                         "신뢰도": "Uncertain" if item.get('is_uncertain', False) else "확실"
                     })
                 summary["세그먼트_분석"][segment_names.get(segment_type, segment_type)] = segment_summary
@@ -204,8 +237,8 @@ class LLMInsightGenerator:
         if trends:
             trend_data = trends.get('monthly_churn_rates', [])
             if len(trend_data) >= 2:
-                first_rate = trend_data[0].get('churn_rate', 0)
-                last_rate = trend_data[-1].get('churn_rate', 0)
+                first_rate = self._convert_decimal(trend_data[0].get('churn_rate', 0))
+                last_rate = self._convert_decimal(trend_data[-1].get('churn_rate', 0))
                 change = last_rate - first_rate
                 
                 summary["트렌드_분석"] = {
@@ -218,11 +251,16 @@ class LLMInsightGenerator:
         
         # 데이터 품질 요약
         quality = analysis_data.get('data_quality', {})
+        total_events = int(self._convert_decimal(quality.get('total_events', 0)))
+        valid_events = int(self._convert_decimal(quality.get('valid_events', 0)))
+        completeness = self._convert_decimal(quality.get('data_completeness', 0))
+        unknown_ratio = self._convert_decimal(quality.get('unknown_ratio', 0))
+        
         summary["데이터_품질"] = {
-            "총_이벤트": quality.get('total_events', 0),
-            "유효_이벤트": quality.get('valid_events', 0),
-            "완전성": f"{quality.get('data_completeness', 0):.1f}%",
-            "알수없음_비율": f"{quality.get('unknown_ratio', 0):.1f}%"
+            "총_이벤트": total_events,
+            "유효_이벤트": valid_events,
+            "완전성": f"{completeness:.1f}%",
+            "알수없음_비율": f"{unknown_ratio:.1f}%"
         }
         
         return summary
@@ -268,16 +306,17 @@ class LLMInsightGenerator:
 
 ## 요청사항
 
-1. **주요 인사이트 3개**: 데이터에서 발견된 가장 중요한 패턴이나 문제점
-2. **권장 액션 3개**: 이탈률 개선을 위한 구체적이고 실행 가능한 방안
+1. **주요 인사이트 3개**: 데이터에서 발견된 가장 중요한 패턴이나 문제점을 존댓말로 설명해주세요
+2. **권장 액션 3개**: 이탈률 개선을 위한 구체적이고 실행 가능한 방안을 존댓말로 제시해주세요
 
 주의사항:
+- 반드시 존댓말을 사용하여 응답해주세요
 - 선택되지 않은 세그먼트(성별/연령대/채널)에 대해서는 언급하지 마세요
 - 선택된 세그먼트만 분석하고 인사이트를 제공하세요
-- 통계적으로 유의미한 차이(5%p 이상)만 언급
-- 데이터가 부족한 세그먼트는 "Uncertain" 표기
-- 구체적인 수치와 함께 설명
-- 실무진이 바로 실행할 수 있는 액션 제시
+- 통계적으로 유의미한 차이(5%p 이상)만 언급해주세요
+- 데이터가 부족한 세그먼트는 "Uncertain" 표기해주세요
+- 구체적인 수치와 함께 설명해주세요
+- 실무진이 바로 실행할 수 있는 액션을 제시해주세요
 
 금지사항:
 - 데이터에 없는 정보를 추측하거나 가정하지 마세요

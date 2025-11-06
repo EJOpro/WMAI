@@ -542,6 +542,19 @@ async def create_post(request: Request, data: PostCreate):
         VALUES (%s, %s, %s, %s, %s)
     """, (user['user_id'], data.title, data.content, data.category, content_status))
     
+    # 이벤트 기록 (게시글 작성)
+    try:
+        from chrun_backend.user_hash_utils import get_user_hash_for_event
+        from datetime import datetime
+        user_hash = get_user_hash_for_event(user['user_id'])
+        execute_query(
+            "INSERT INTO events (user_hash, action, channel, created_at) VALUES (%s, %s, %s, %s)",
+            (user_hash, 'post', 'web', datetime.now())
+        )
+    except Exception as e:
+        # 이벤트 기록 실패해도 게시글 작성은 성공 처리
+        print(f"[WARNING] 이벤트 기록 실패 (무시): {e}")
+    
     # 응답 메시지
     if content_status == 'blocked':
         return {
@@ -814,6 +827,19 @@ async def create_comment(request: Request, post_id: int, data: CommentCreate):
         INSERT INTO comment (board_id, user_id, content, parent_id, status)
         VALUES (%s, %s, %s, %s, %s)
     """, (post_id, user['user_id'], data.content, data.parent_id, content_status))
+    
+    # 이벤트 기록 (댓글 작성)
+    try:
+        from chrun_backend.user_hash_utils import get_user_hash_for_event
+        from datetime import datetime
+        user_hash = get_user_hash_for_event(user['user_id'])
+        execute_query(
+            "INSERT INTO events (user_hash, action, channel, created_at) VALUES (%s, %s, %s, %s)",
+            (user_hash, 'comment', 'web', datetime.now())
+        )
+    except Exception as e:
+        # 이벤트 기록 실패해도 댓글 작성은 성공 처리
+        print(f"[WARNING] 이벤트 기록 실패 (무시): {e}")
     
     # 응답 메시지
     if content_status == 'blocked':

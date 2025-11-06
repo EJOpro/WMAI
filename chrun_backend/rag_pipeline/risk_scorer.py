@@ -214,7 +214,9 @@ class RiskScorer:
         """
         try:
             # 벡터 스토어 import (지연 import로 순환 참조 방지)
-            from .vector_store import upsert_high_risk_chunk
+            from .vector_store import get_vector_store
+            
+            vector_store = get_vector_store()
             
             for sentence_data in high_risk_sentences:
                 sentence = sentence_data.get('sentence', '')
@@ -224,19 +226,22 @@ class RiskScorer:
                 
                 # 메타데이터 준비
                 metadata_dict = {
-                    "user_id": sentence_data.get('user_id'),
-                    "post_id": sentence_data.get('post_id'),
+                    "user_id": sentence_data.get('user_id', 'unknown'),
+                    "post_id": sentence_data.get('post_id', 'unknown'),
                     "sentence": sentence,
-                    "risk_score": sentence_data.get('risk_score'),
-                    "created_at": sentence_data.get('created_at'),
-                    "sentence_index": sentence_data.get('sentence_index'),
-                    "risk_level": sentence_data.get('risk_level'),
+                    "risk_score": sentence_data.get('risk_score', 0.0),
+                    "created_at": sentence_data.get('created_at', datetime.now().isoformat()),
+                    "sentence_index": sentence_data.get('sentence_index', 0),
+                    "risk_level": sentence_data.get('risk_level', 'unknown'),
                     "risk_factors": sentence_data.get('risk_factors', []),
-                    "analyzed_at": sentence_data.get('analyzed_at')
+                    "analyzed_at": sentence_data.get('analyzed_at', datetime.now().isoformat()),
+                    "confirmed": False  # 자동 저장된 문장은 미확인 상태
                 }
                 
                 # 벡터 DB에 저장
-                upsert_high_risk_chunk(embedding, metadata_dict)
+                vector_store.upsert_high_risk_chunk(embedding, metadata_dict)
+                
+            print(f"[INFO] {len(high_risk_sentences)}개의 고위험 문장을 ChromaDB에 저장 완료")
                 
         except ImportError as e:
             print(f"[WARN] 벡터 스토어 모듈을 불러올 수 없습니다: {e}")

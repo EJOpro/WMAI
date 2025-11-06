@@ -749,111 +749,114 @@ async def delete_old_ethics_logs(days: int = Query(90, description="보관 기�
         raise HTTPException(status_code=500, detail=f"로그 삭제 중 오류: {str(e)}")
 
 
-@router.get("/risk/top", tags=["risk"])
-async def get_risk_top_users(limit: int = Query(10, ge=1, le=100, description="조회할 사용자 수")):
-    """
-    고위험 사용자 목록 조회
-    
-    - **limit**: 조회할 사용자 수 (기본값: 10, 최대: 100)
-    
-    Returns:
-    - summary: 통계 요약 정보
-    - users: 고위험 사용자 목록
-    """
-    try:
-        from chrun_backend.rag_pipeline.high_risk_store import get_recent_high_risk, init_db
-        from datetime import datetime
-        
-        # DB 초기화 (없으면 생성)
-        init_db()
-        
-        # 고위험 데이터 조회
-        risk_data = get_recent_high_risk(limit=limit)
-        
-        if not risk_data:
-            return {
-                "summary": {
-                    "total_users": 0,
-                    "high_priority_count": 0,
-                    "medium_priority_count": 0,
-                    "avg_risk_score": 0.0
-                },
-                "users": []
-            }
-        
-        # 사용자별로 그룹화 (같은 user_id의 문장들을 하나의 사용자로)
-        user_dict = {}
-        for item in risk_data:
-            user_id = item['user_id']
-            if user_id not in user_dict:
-                user_dict[user_id] = {
-                    'chunk_id': item['chunk_id'],
-                    'user_id': user_id,
-                    'username': f"사용자_{user_id}",
-                    'post_id': item.get('post_id', ''),
-                    'risk_score': item['risk_score'],
-                    'confirmed': bool(item.get('confirmed', 0)),
-                    'evidence_sentences': [],
-                    'last_activity': item.get('created_at', datetime.now().isoformat()),
-                    'feedback_at': item.get('created_at') if item.get('confirmed') else None
-                }
-            
-            # 문장 추가
-            user_dict[user_id]['evidence_sentences'].append(item['sentence'])
-            
-            # 가장 높은 risk_score 사용
-            if item['risk_score'] > user_dict[user_id]['risk_score']:
-                user_dict[user_id]['risk_score'] = item['risk_score']
-                user_dict[user_id]['chunk_id'] = item['chunk_id']
-        
-        # 사용자 리스트로 변환
-        users = []
-        for user_data in user_dict.values():
-            # Priority 결정 (risk_score >= 0.7: HIGH, >= 0.5: MEDIUM, 그 외: LOW)
-            if user_data['risk_score'] >= 0.7:
-                priority = 'HIGH'
-            elif user_data['risk_score'] >= 0.5:
-                priority = 'MEDIUM'
-            else:
-                priority = 'LOW'
-            
-            # 제안 조치사항 생성
-            if priority == 'HIGH':
-                suggested_action = "즉시 연락 및 개선 조치 필요. 고위험 이탈 징후 감지됨."
-            elif priority == 'MEDIUM':
-                suggested_action = "모니터링 강화 및 예방적 조치 권장."
-            else:
-                suggested_action = "정기 모니터링 권장."
-            
-            users.append({
-                **user_data,
-                'priority': priority,
-                'similar_patterns_count': len(user_data['evidence_sentences']),
-                'suggested_action': suggested_action
-            })
-        
-        # risk_score 기준으로 정렬
-        users.sort(key=lambda x: x['risk_score'], reverse=True)
-        
-        # 통계 계산
-        high_priority_count = sum(1 for u in users if u['priority'] == 'HIGH')
-        medium_priority_count = sum(1 for u in users if u['priority'] == 'MEDIUM')
-        avg_risk_score = sum(u['risk_score'] for u in users) / len(users) if users else 0.0
-        
-        return {
-            "summary": {
-                "total_users": len(users),
-                "high_priority_count": high_priority_count,
-                "medium_priority_count": medium_priority_count,
-                "avg_risk_score": round(avg_risk_score, 2)
-            },
-            "users": users
-        }
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"고위험 사용자 조회 중 오류: {str(e)}")
+# ============================================
+# RAG 관련 코드 (테스트 완료 전까지 주석 처리)
+# ============================================
+# @router.get("/risk/top", tags=["risk"])
+# async def get_risk_top_users(limit: int = Query(10, ge=1, le=100, description="조회할 사용자 수")):
+#     """
+#     고위험 사용자 목록 조회
+#     
+#     - **limit**: 조회할 사용자 수 (기본값: 10, 최대: 100)
+#     
+#     Returns:
+#     - summary: 통계 요약 정보
+#     - users: 고위험 사용자 목록
+#     """
+#     try:
+#         from chrun_backend.rag_pipeline.high_risk_store import get_recent_high_risk, init_db
+#         from datetime import datetime
+#         
+#         # DB 초기화 (없으면 생성)
+#         init_db()
+#         
+#         # 고위험 데이터 조회
+#         risk_data = get_recent_high_risk(limit=limit)
+#         
+#         if not risk_data:
+#             return {
+#                 "summary": {
+#                     "total_users": 0,
+#                     "high_priority_count": 0,
+#                     "medium_priority_count": 0,
+#                     "avg_risk_score": 0.0
+#                 },
+#                 "users": []
+#             }
+#         
+#         # 사용자별로 그룹화 (같은 user_id의 문장들을 하나의 사용자로)
+#         user_dict = {}
+#         for item in risk_data:
+#             user_id = item['user_id']
+#             if user_id not in user_dict:
+#                 user_dict[user_id] = {
+#                     'chunk_id': item['chunk_id'],
+#                     'user_id': user_id,
+#                     'username': f"사용자_{user_id}",
+#                     'post_id': item.get('post_id', ''),
+#                     'risk_score': item['risk_score'],
+#                     'confirmed': bool(item.get('confirmed', 0)),
+#                     'evidence_sentences': [],
+#                     'last_activity': item.get('created_at', datetime.now().isoformat()),
+#                     'feedback_at': item.get('created_at') if item.get('confirmed') else None
+#                 }
+#             
+#             # 문장 추가
+#             user_dict[user_id]['evidence_sentences'].append(item['sentence'])
+#             
+#             # 가장 높은 risk_score 사용
+#             if item['risk_score'] > user_dict[user_id]['risk_score']:
+#                 user_dict[user_id]['risk_score'] = item['risk_score']
+#                 user_dict[user_id]['chunk_id'] = item['chunk_id']
+#         
+#         # 사용자 리스트로 변환
+#         users = []
+#         for user_data in user_dict.values():
+#             # Priority 결정 (risk_score >= 0.7: HIGH, >= 0.5: MEDIUM, 그 외: LOW)
+#             if user_data['risk_score'] >= 0.7:
+#                 priority = 'HIGH'
+#             elif user_data['risk_score'] >= 0.5:
+#                 priority = 'MEDIUM'
+#             else:
+#                 priority = 'LOW'
+#             
+#             # 제안 조치사항 생성
+#             if priority == 'HIGH':
+#                 suggested_action = "즉시 연락 및 개선 조치 필요. 고위험 이탈 징후 감지됨."
+#             elif priority == 'MEDIUM':
+#                 suggested_action = "모니터링 강화 및 예방적 조치 권장."
+#             else:
+#                 suggested_action = "정기 모니터링 권장."
+#             
+#             users.append({
+#                 **user_data,
+#                 'priority': priority,
+#                 'similar_patterns_count': len(user_data['evidence_sentences']),
+#                 'suggested_action': suggested_action
+#             })
+#         
+#         # risk_score 기준으로 정렬
+#         users.sort(key=lambda x: x['risk_score'], reverse=True)
+#         
+#         # 통계 계산
+#         high_priority_count = sum(1 for u in users if u['priority'] == 'HIGH')
+#         medium_priority_count = sum(1 for u in users if u['priority'] == 'MEDIUM')
+#         avg_risk_score = sum(u['risk_score'] for u in users) / len(users) if users else 0.0
+#         
+#         return {
+#             "summary": {
+#                 "total_users": len(users),
+#                 "high_priority_count": high_priority_count,
+#                 "medium_priority_count": medium_priority_count,
+#                 "avg_risk_score": round(avg_risk_score, 2)
+#             },
+#             "users": users
+#         }
+#         
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         raise HTTPException(status_code=500, detail=f"고위험 사용자 조회 중 오류: {str(e)}")
 
 
 class RiskFeedbackRequest(BaseModel):
@@ -862,28 +865,120 @@ class RiskFeedbackRequest(BaseModel):
     confirmed: bool
 
 
-@router.post("/risk/feedback", tags=["risk"])
-async def submit_risk_feedback(request_data: RiskFeedbackRequest):
-    """
-    고위험 사용자 피드백 제출
-    
-    - **chunk_id**: 피드백할 chunk_id
-    - **confirmed**: 위험 확인 여부 (true: 위험 맞음, false: 위험 아님)
-    
-    Returns:
-    - 성공 메시지
-    """
-    try:
-        from chrun_backend.rag_pipeline.high_risk_store import update_feedback
-        
-        update_feedback(request_data.chunk_id, request_data.confirmed)
-        
-        return {
-            "status": "ok",
-            "message": f"피드백이 저장되었습니다. (chunk_id: {request_data.chunk_id}, confirmed: {request_data.confirmed})"
-        }
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"피드백 저장 중 오류: {str(e)}")
+class CheckNewPostRequest(BaseModel):
+    """새 게시물 위험도 체크 요청"""
+    text: str
+    user_id: str
+    post_id: str
+    created_at: str
+
+
+# @router.post("/risk/feedback", tags=["risk"])
+# async def submit_risk_feedback(request_data: RiskFeedbackRequest):
+#     """
+#     고위험 사용자 피드백 제출
+#     
+#     - **chunk_id**: 피드백할 chunk_id
+#     - **confirmed**: 위험 확인 여부 (true: 위험 맞음, false: 위험 아님)
+#     
+#     Returns:
+#     - 성공 메시지
+#     """
+#     try:
+#         from chrun_backend.rag_pipeline.high_risk_store import update_feedback, get_chunk_by_id
+#         
+#         # 1. 기존 SQLite 피드백 업데이트 (기존 기능 유지)
+#         update_feedback(request_data.chunk_id, request_data.confirmed)
+#         
+#         # 2. confirmed=true인 경우에만 벡터DB에 저장
+#         if request_data.confirmed:
+#             try:
+#                 # 2-1. SQLite에서 해당 chunk 정보 조회
+#                 chunk_data = get_chunk_by_id(request_data.chunk_id)
+#                 
+#                 if not chunk_data:
+#                     # chunk를 찾을 수 없어도 기본 피드백은 성공으로 처리
+#                     print(f"[WARN] 벡터DB 저장 실패: chunk_id {request_data.chunk_id}를 찾을 수 없음")
+#                 else:
+#                     # 2-2. 임베딩 생성
+#                     from chrun_backend.rag_pipeline.embedding_service import get_embedding
+#                     sentence = chunk_data.get('sentence', '')
+#                     
+#                     if sentence.strip():
+#                         embedding = get_embedding(sentence)
+#                         
+#                         # 2-3. 벡터DB에 저장할 메타데이터 구성
+#                         from chrun_backend.rag_pipeline.vector_db import build_chunk_id
+#                         
+#                         # 안정적인 chunk_id 생성 (기존 chunk_id와 다를 수 있음)
+#                         vector_chunk_id = build_chunk_id(sentence, chunk_data.get('post_id', ''))
+#                         
+#                         meta = {
+#                             "chunk_id": vector_chunk_id,  # 벡터DB용 안정적 ID
+#                             "original_chunk_id": chunk_data.get('chunk_id'),  # 원본 SQLite chunk_id
+#                             "user_id": chunk_data.get('user_id', ''),
+#                             "post_id": chunk_data.get('post_id', ''),
+#                             "sentence": sentence,
+#                             "risk_score": float(chunk_data.get('risk_score', 0.0)),
+#                             "created_at": chunk_data.get('created_at', ''),
+#                             "confirmed": True
+#                         }
+#                         
+#                         # 2-4. 벡터DB에 upsert (idempotent)
+#                         from chrun_backend.rag_pipeline.vector_db import get_client, upsert_confirmed_chunk
+#                         
+#                         client = get_client()  # 기본 경로 "./chroma_store" 사용
+#                         upsert_confirmed_chunk(client, embedding, meta)
+#                         
+#                         print(f"[INFO] 확인된 위험 문장을 벡터DB에 저장 완료: {vector_chunk_id}")
+#                     else:
+#                         print(f"[WARN] 벡터DB 저장 실패: 빈 문장 (chunk_id: {request_data.chunk_id})")
+#                         
+#             except Exception as vector_error:
+#                 # 벡터DB 저장 실패해도 기본 피드백은 성공으로 처리
+#                 import traceback
+#                 print(f"[ERROR] 벡터DB 저장 중 오류 발생: {vector_error}")
+#                 traceback.print_exc()
+#                 # 에러 로그만 남기고 API는 성공으로 응답
+#         
+#         return {
+#             "status": "ok",
+#             "message": f"피드백이 저장되었습니다. (chunk_id: {request_data.chunk_id}, confirmed: {request_data.confirmed})"
+#         }
+#         
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         raise HTTPException(status_code=500, detail=f"피드백 저장 중 오류: {str(e)}")
+
+
+# @router.post("/risk/check_new_post", tags=["risk"])
+# async def check_new_post_risk(request_data: CheckNewPostRequest):
+#     """
+#     새 게시물의 위험도를 체크하여 근거 컨텍스트를 반환합니다.
+#     
+#     - **text**: 분석할 게시물 텍스트
+#     - **user_id**: 사용자 ID
+#     - **post_id**: 게시물 ID
+#     - **created_at**: 생성 시간 (ISO 형식, 예: "2024-11-04T10:30:00")
+#     
+#     Returns:
+#     - 위험도 분석을 위한 컨텍스트 (근거 문장들과 통계 정보)
+#     """
+#     try:
+#         from chrun_backend.rag_pipeline.rag_checker import check_new_post
+#         
+#         # RAG 기반 위험도 체크 수행
+#         context = check_new_post(
+#             text=request_data.text,
+#             user_id=request_data.user_id,
+#             post_id=request_data.post_id,
+#             created_at=request_data.created_at
+#         )
+#         
+#         return context
+#         
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         raise HTTPException(status_code=500, detail=f"새 게시물 위험도 체크 중 오류: {str(e)}")
