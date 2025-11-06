@@ -44,12 +44,12 @@
                         </div>
                         <div class="card-body">
                             <div class="form-row">
-                                <label class="form-label">시작일:</label>
-                                <input type="date" class="form-control" id="startDate" value="2025-08-01">
+                                <label class="form-label">시작월:</label>
+                                <input type="month" class="form-control" id="startMonth" value="2025-08">
                             </div>
                             <div class="form-row">
-                                <label class="form-label">종료일:</label>
-                                <input type="date" class="form-control" id="endDate" value="2025-10-31">
+                                <label class="form-label">종료월:</label>
+                                <input type="month" class="form-control" id="endMonth" value="2025-10">
                             </div>
                         </div>
                     </div>
@@ -159,7 +159,7 @@
                             <div>
                                 <div class="card text-center metric-card">
                                     <div class="card-body">
-                                        <h6 class="card-subtitle mb-2 text-muted">전체 이탈률</h6>
+                                        <h6 class="card-subtitle mb-2 text-muted" id="churnCardTitle">Churn (Last: - vs -)</h6>
                                         <h2 class="card-title text-danger" id="churnRate">-</h2>
                                         <p class="card-text">
                                             <span class="badge" id="churnSeverity">분석필요</span><br>

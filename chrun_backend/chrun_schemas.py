@@ -6,7 +6,11 @@ from enum import Enum
 # Enum 정의
 class ActionType(str, Enum):
     post = "post"
+    post_modify = "post_modify"
+    post_delete = "post_delete"
     comment = "comment"
+    comment_modify = "comment_modify"
+    comment_delete = "comment_delete"
     view = "view"
     login = "login"
     like = "like"

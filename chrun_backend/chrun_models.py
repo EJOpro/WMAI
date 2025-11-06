@@ -9,23 +9,16 @@ class Event(Base):
     """사용자 이벤트 테이블"""
     __tablename__ = "events"
     
-    id = Column(Integer, primary_key=True, index=True)
+    # MySQL 테이블 구조에 맞게 수정
+    # 실제 MySQL 테이블: id BIGINT, user_hash VARCHAR(255), action ENUM, channel VARCHAR(100), created_at DATETIME
+    id = Column(Integer, primary_key=True, index=True)  # SQLAlchemy는 Integer를 BIGINT로 매핑
     user_hash = Column(String(255), nullable=False, index=True)
+    action = Column(String(50), nullable=False)  # MySQL에서는 ENUM이지만 SQLAlchemy에서는 String으로 매핑
+    channel = Column(String(100), default='Unknown')  # MySQL: VARCHAR(100)
     created_at = Column(DateTime, nullable=False, index=True)
-    action = Column(String(50), nullable=False)  # 'post', 'comment'
-    channel = Column(String(50), default='Unknown')  # 'web', 'app', 'Unknown'
     
-    # 메타데이터
-    inserted_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # 복합 인덱스
-    __table_args__ = (
-        Index('idx_user_date', 'user_hash', 'created_at'),
-        Index('idx_date_action', 'created_at', 'action'),
-        Index('idx_user_channel', 'user_hash', 'channel'),
-        Index('idx_monthly', 'user_hash', func.date_trunc('month', 'created_at')),
-    )
+    # MySQL 테이블에는 inserted_at, updated_at이 없으므로 제거
+    # SQLAlchemy가 자동으로 테이블 구조를 읽어오므로 컬럼이 없으면 무시됨
 
 class User(Base):
     """사용자 프로필 테이블 (선택사항)"""

@@ -149,10 +149,54 @@ class ChurnAnalyzer:
             }
             
         except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            print(f"[ERROR] 분석 실행 중 오류 발생: {e}")
+            print(f"[ERROR] 상세 오류:\n{error_detail}")
+            
+            # 오류 발생 시에도 가능한 데이터로 LLM 인사이트 생성 시도
+            try:
+                # 최소한의 데이터로 LLM 호출
+                llm_result = self._generate_llm_insights_and_actions({
+                    "start_month": start_month,
+                    "end_month": end_month,
+                    "metrics": {},
+                    "trends": {},
+                    "segments": {},
+                    "inactivity": {},
+                    "reactivation": {},
+                    "data_quality": {},
+                    "config": {
+                        "segments": segments if segments else {}
+                    },
+                    "error": str(e)
+                })
+                
+                insights = llm_result.get('insights', [])
+                actions = llm_result.get('actions', [])
+            except Exception as llm_error:
+                print(f"[ERROR] LLM 인사이트 생성도 실패: {llm_error}")
+                insights = [
+                    f"분석 중 오류가 발생했습니다: {str(e)}",
+                    "데이터 범위나 형식을 확인해주세요.",
+                    "오류 해결 후 다시 분석을 실행해주세요."
+                ]
+                actions = [
+                    "분석 기간과 데이터 범위를 확인하세요.",
+                    "데이터베이스 연결 상태를 확인하세요.",
+                    "오류 로그를 확인하여 문제를 해결하세요."
+                ]
+            
             return {
                 "error": str(e),
                 "timestamp": datetime.now().isoformat(),
-                "execution_time_seconds": (datetime.now() - start_time).total_seconds()
+                "execution_time_seconds": (datetime.now() - start_time).total_seconds(),
+                "insights": insights,
+                "actions": actions,
+                "metrics": {},
+                "trends": {},
+                "segments": {},
+                "data_quality": {}
             }
     
     def get_monthly_metrics(self, month: str, threshold: int = 1) -> Dict:
@@ -210,10 +254,20 @@ class ChurnAnalyzer:
         if not result:
             return {"error": "데이터를 찾을 수 없습니다."}
         
-        current_active = result.current_active_users or 0
-        previous_active = result.previous_active_users or 0
-        churned = result.churned_users or 0
-        retained = result.retained_users or 0
+        # Decimal 타입을 int로 변환
+        from decimal import Decimal
+        def to_int(value):
+            if isinstance(value, Decimal):
+                return int(value)
+            elif value is None:
+                return 0
+            else:
+                return int(value)
+        
+        current_active = to_int(result.current_active_users)
+        previous_active = to_int(result.previous_active_users)
+        churned = to_int(result.churned_users)
+        retained = to_int(result.retained_users)
         
         # 이탈률 계산
         churn_rate = (churned / previous_active * 100) if previous_active > 0 else 0
@@ -263,23 +317,42 @@ class ChurnAnalyzer:
             "trends": trends
         }
     
-    def get_segment_analysis(self, start_month: str, end_month: str) -> Dict:
-        """세그먼트별 이탈률 분석 - 실제 존재하는 컬럼만 분석"""
+    def get_segment_analysis(self, start_month: str, end_month: str, segments_config: Dict[str, bool] = None) -> Dict:
+        """세그먼트별 이탈률 분석 - 선택된 세그먼트만 분석"""
+        
+        if segments_config is None:
+            segments_config = {"channel": False, "action_type": False, "weekday_pattern": False, "time_pattern": False}
         
         segments = {}
         
-        # 데이터베이스에 실제 존재하는 컬럼만 분석
-        # Event 모델에는 gender, age_band가 없으므로 channel만 분석
-        # action은 _analyze_action_type_segment로 별도 분석
-        available_segments = ["channel"]
-        
-        for segment_type in available_segments:
+        # 선택된 세그먼트만 분석
+        if segments_config.get("channel", False):
             try:
-                segments[segment_type] = self._analyze_segment(segment_type, start_month, end_month)
+                segments["channel"] = self._analyze_segment("channel", start_month, end_month)
             except Exception as e:
-                # 컬럼이 존재하지 않으면 빈 배열 반환
-                print(f"⚠️ 세그먼트 {segment_type} 분석 실패: {e}")
-                segments[segment_type] = []
+                print(f"⚠️ 세그먼트 channel 분석 실패: {e}")
+                segments["channel"] = []
+        
+        if segments_config.get("action_type", False):
+            try:
+                segments["action_type"] = self._analyze_action_type_segment(start_month, end_month)
+            except Exception as e:
+                print(f"⚠️ 세그먼트 action_type 분석 실패: {e}")
+                segments["action_type"] = []
+        
+        if segments_config.get("weekday_pattern", False):
+            try:
+                segments["weekday_pattern"] = self._analyze_weekday_pattern(start_month, end_month)
+            except Exception as e:
+                print(f"⚠️ 세그먼트 weekday_pattern 분석 실패: {e}")
+                segments["weekday_pattern"] = []
+        
+        if segments_config.get("time_pattern", False):
+            try:
+                segments["time_pattern"] = self._analyze_time_pattern(start_month, end_month)
+            except Exception as e:
+                print(f"⚠️ 세그먼트 time_pattern 분석 실패: {e}")
+                segments["time_pattern"] = []
         
         return segments
     
@@ -354,91 +427,102 @@ class ChurnAnalyzer:
             return []
         
         month_trunc = self._get_month_trunc('created_at')
-        month_subtract = self._get_month_subtract('sm.month', 1)
+        
+        # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
+        # SQLite에서는 문자열을 날짜로 변환 후 빼기
+        if self.is_mysql:
+            month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(sm.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
+        elif self.is_sqlite:
+            month_subtract = "strftime('%Y-%m', datetime(sm.month || '-01', '-1 month'))"
+        else:
+            month_subtract = self._get_month_subtract("STR_TO_DATE(CONCAT(sm.month, '-01'), '%Y-%m-%d')", 1)
         
         try:
+            # 모든 세그먼트 타입에 대해 동일한 로직 사용
+            # 채널의 경우: 사용자가 해당 채널을 사용했으면 (이벤트가 있으면) 그 채널로 카운트
+            # 같은 사용자가 여러 채널을 사용하면 각 채널에 모두 포함됨 (독립적인 이탈률 계산)
             query = text(f"""
-            WITH segment_monthly AS (
+                WITH segment_monthly AS (
+                    SELECT 
+                        {segment_type} AS segment_value,
+                        {month_trunc} AS month,
+                        user_hash
+                    FROM events 
+                    WHERE {month_trunc} BETWEEN :start_month AND :end_month
+                      AND {segment_type} IS NOT NULL 
+                      AND {segment_type} != 'Unknown'
+                    GROUP BY {segment_type}, {month_trunc}, user_hash
+                ),
+                segment_months AS (
+                    SELECT DISTINCT segment_value, month FROM segment_monthly
+                ),
+                month_pairs AS (
+                    SELECT 
+                        sm.segment_value,
+                        sm.month AS curr_month,
+                        {month_subtract} AS prev_month
+                    FROM segment_months sm
+                    WHERE sm.month > :start_month
+                ),
+                prev_active AS (
+                    SELECT 
+                        mp.segment_value,
+                        mp.curr_month,
+                        COUNT(DISTINCT m.user_hash) AS previous_active
+                    FROM month_pairs mp
+                    LEFT JOIN segment_monthly m
+                      ON m.segment_value = mp.segment_value AND m.month = mp.prev_month
+                    GROUP BY mp.segment_value, mp.curr_month
+                ),
+                curr_active AS (
+                    SELECT 
+                        mp.segment_value,
+                        mp.curr_month,
+                        COUNT(DISTINCT m.user_hash) AS current_active
+                    FROM month_pairs mp
+                    LEFT JOIN segment_monthly m
+                      ON m.segment_value = mp.segment_value AND m.month = mp.curr_month
+                    GROUP BY mp.segment_value, mp.curr_month
+                ),
+                churned AS (
+                    SELECT 
+                        mp.segment_value,
+                        mp.curr_month,
+                        COUNT(DISTINCT pm.user_hash) AS churned_users
+                    FROM month_pairs mp
+                    LEFT JOIN segment_monthly pm
+                      ON pm.segment_value = mp.segment_value AND pm.month = mp.prev_month
+                    LEFT JOIN segment_monthly cm
+                      ON cm.segment_value = mp.segment_value AND cm.month = mp.curr_month AND cm.user_hash = pm.user_hash
+                    WHERE cm.user_hash IS NULL
+                    GROUP BY mp.segment_value, mp.curr_month
+                ),
+                aggregated AS (
+                    SELECT 
+                        mp.segment_value,
+                        SUM(COALESCE(pa.previous_active, 0)) AS previous_active_sum,
+                        SUM(COALESCE(ca.current_active, 0)) AS current_active_sum,
+                        SUM(COALESCE(ch.churned_users, 0)) AS churned_sum
+                    FROM month_pairs mp
+                    LEFT JOIN prev_active pa ON pa.segment_value = mp.segment_value AND pa.curr_month = mp.curr_month
+                    LEFT JOIN curr_active ca ON ca.segment_value = mp.segment_value AND ca.curr_month = mp.curr_month
+                    LEFT JOIN churned ch ON ch.segment_value = mp.segment_value AND ch.curr_month = mp.curr_month
+                    GROUP BY mp.segment_value
+                )
                 SELECT 
-                    {segment_type} AS segment_value,
-                    {month_trunc} AS month,
-                    user_hash
-                FROM events 
-                WHERE {month_trunc} BETWEEN :start_month AND :end_month
-                  AND {segment_type} IS NOT NULL 
-                  AND {segment_type} != 'Unknown'
-                GROUP BY {segment_type}, {month_trunc}, user_hash
-            ),
-        segment_months AS (
-            SELECT DISTINCT segment_value, month FROM segment_monthly
-        ),
-        month_pairs AS (
-            SELECT 
-                sm.segment_value,
-                sm.month AS curr_month,
-                {month_subtract} AS prev_month
-            FROM segment_months sm
-            WHERE sm.month > :start_month
-        ),
-        prev_active AS (
-            SELECT 
-                mp.segment_value,
-                mp.curr_month,
-                COUNT(DISTINCT m.user_hash) AS previous_active
-            FROM month_pairs mp
-            LEFT JOIN segment_monthly m
-              ON m.segment_value = mp.segment_value AND m.month = mp.prev_month
-            GROUP BY mp.segment_value, mp.curr_month
-        ),
-        curr_active AS (
-            SELECT 
-                mp.segment_value,
-                mp.curr_month,
-                COUNT(DISTINCT m.user_hash) AS current_active
-            FROM month_pairs mp
-            LEFT JOIN segment_monthly m
-              ON m.segment_value = mp.segment_value AND m.month = mp.curr_month
-            GROUP BY mp.segment_value, mp.curr_month
-        ),
-        churned AS (
-            SELECT 
-                mp.segment_value,
-                mp.curr_month,
-                COUNT(DISTINCT pm.user_hash) AS churned_users
-            FROM month_pairs mp
-            LEFT JOIN segment_monthly pm
-              ON pm.segment_value = mp.segment_value AND pm.month = mp.prev_month
-            LEFT JOIN segment_monthly cm
-              ON cm.segment_value = mp.segment_value AND cm.month = mp.curr_month AND cm.user_hash = pm.user_hash
-            WHERE cm.user_hash IS NULL
-            GROUP BY mp.segment_value, mp.curr_month
-        ),
-        aggregated AS (
-            SELECT 
-                mp.segment_value,
-                SUM(COALESCE(pa.previous_active, 0)) AS previous_active_sum,
-                SUM(COALESCE(ca.current_active, 0)) AS current_active_sum,
-                SUM(COALESCE(ch.churned_users, 0)) AS churned_sum
-            FROM month_pairs mp
-            LEFT JOIN prev_active pa ON pa.segment_value = mp.segment_value AND pa.curr_month = mp.curr_month
-            LEFT JOIN curr_active ca ON ca.segment_value = mp.segment_value AND ca.curr_month = mp.curr_month
-            LEFT JOIN churned ch ON ch.segment_value = mp.segment_value AND ch.curr_month = mp.curr_month
-            GROUP BY mp.segment_value
-        )
-        SELECT 
-            segment_value,
-            current_active_sum AS current_active,
-            previous_active_sum AS previous_active,
-            churned_sum AS churned,
-            CASE 
-                WHEN previous_active_sum > 0 THEN ROUND((CAST(churned_sum AS FLOAT) / previous_active_sum * 100), 1)
-                ELSE 0 
-            END AS churn_rate,
-            CASE WHEN previous_active_sum < :min_sample THEN 1 ELSE 0 END AS is_uncertain
-        FROM aggregated
-        WHERE previous_active_sum > 0
-        ORDER BY churn_rate DESC
-        """)
+                    segment_value,
+                    current_active_sum AS current_active,
+                    previous_active_sum AS previous_active,
+                    churned_sum AS churned,
+                    CASE 
+                        WHEN previous_active_sum > 0 THEN ROUND((CAST(churned_sum AS FLOAT) / previous_active_sum * 100), 1)
+                        ELSE 0 
+                    END AS churn_rate,
+                    CASE WHEN previous_active_sum < :min_sample THEN 1 ELSE 0 END AS is_uncertain
+                FROM aggregated
+                WHERE previous_active_sum > 0
+                ORDER BY churn_rate DESC
+                """)
             
             results = self.db.execute(query, {
                 "start_month": f"{start_month}-01",
@@ -446,14 +530,20 @@ class ChurnAnalyzer:
                 "min_sample": self.min_sample_size
             }).fetchall()
             
+            from decimal import Decimal
+            def convert_value(value):
+                if isinstance(value, Decimal):
+                    return float(value) if isinstance(value, Decimal) and value % 1 != 0 else int(value)
+                return value
+            
             return [
                 {
                     "segment_value": row.segment_value,
-                    "current_active": row.current_active,
-                    "previous_active": row.previous_active,
-                    "churned_users": row.churned,
-                    "churn_rate": row.churn_rate,
-                    "is_uncertain": row.is_uncertain
+                    "current_active": int(convert_value(row.current_active)),
+                    "previous_active": int(convert_value(row.previous_active)),
+                    "churned_users": int(convert_value(row.churned)),
+                    "churn_rate": float(convert_value(row.churn_rate)),
+                    "is_uncertain": bool(row.is_uncertain)
                 }
                 for row in results
             ]
@@ -468,31 +558,59 @@ class ChurnAnalyzer:
         """장기 미접속 분석"""
         
         results = {}
-        month_end = f"{month}-01"
+        # 월의 마지막 날짜 계산 (실제 월의 일수 고려)
+        from calendar import monthrange
+        year, month_num = map(int, month.split('-'))
+        last_day = monthrange(year, month_num)[1]  # 해당 월의 마지막 날짜
+        month_end = f"{month}-{last_day:02d}"
+        month_end_date = datetime.strptime(month_end, "%Y-%m-%d")
         
         for days in days_list:
-            cutoff_date = datetime.strptime(month_end, "%Y-%m-%d") - timedelta(days=days)
+            cutoff_date = month_end_date - timedelta(days=days)
             
+            # 사용자 목록도 함께 반환
             query = text("""
-            SELECT COUNT(DISTINCT user_hash) as inactive_count
-            FROM (
-                SELECT user_hash, MAX(created_at) as last_activity
-                FROM events
-                GROUP BY user_hash
-                HAVING MAX(created_at) < :cutoff_date
-            ) inactive_users
+            SELECT 
+                user_hash,
+                MAX(created_at) as last_activity
+            FROM events
+            GROUP BY user_hash
+            HAVING MAX(created_at) < :cutoff_date
+            ORDER BY last_activity ASC
             """)
             
-            result = self.db.execute(query, {"cutoff_date": cutoff_date}).fetchone()
-            results[f"inactive_{days}d"] = result.inactive_count if result else 0
+            inactive_users_result = self.db.execute(query, {"cutoff_date": cutoff_date}).fetchall()
+            
+            from decimal import Decimal
+            inactive_count = len(inactive_users_result)
+            
+            # 사용자 목록 생성 (user_hash와 마지막 활동일 포함)
+            inactive_users_list = []
+            for row in inactive_users_result:
+                last_activity = row.last_activity
+                if isinstance(last_activity, str):
+                    last_activity = datetime.strptime(last_activity, "%Y-%m-%d %H:%M:%S")
+                inactive_days = (month_end_date - last_activity).days
+                inactive_users_list.append({
+                    "user_hash": row.user_hash,
+                    "last_activity": last_activity.isoformat() if isinstance(last_activity, datetime) else str(last_activity),
+                    "inactive_days": inactive_days
+                })
+            
+            results[f"inactive_{days}d"] = inactive_count
+            results[f"inactive_{days}d_users"] = inactive_users_list
         
         return results
     
     def _analyze_reactivation(self, month: str, gap_days: int = 30) -> Dict:
         """재활성 사용자 분석"""
         
+        # 월의 마지막 날짜 계산 (실제 월의 일수 고려)
+        from calendar import monthrange
+        year, month_num = map(int, month.split('-'))
+        last_day = monthrange(year, month_num)[1]  # 해당 월의 마지막 날짜
         month_start = f"{month}-01"
-        month_end = f"{month}-31"  # 간단화
+        month_end = f"{month}-{last_day:02d}"
         
         # SQLite/MySQL 호환성을 위해 직접 날짜 계산
         if self.is_sqlite:
@@ -529,8 +647,13 @@ class ChurnAnalyzer:
             "gap_days": gap_days
         }).fetchone()
         
+        from decimal import Decimal
+        reactivated_count = result.reactivated_count if result else 0
+        if isinstance(reactivated_count, Decimal):
+            reactivated_count = int(reactivated_count)
+        
         return {
-            "reactivated_users": result.reactivated_count if result else 0,
+            "reactivated_users": reactivated_count,
             "gap_days": gap_days
         }
     
@@ -634,16 +757,26 @@ class ChurnAnalyzer:
         if not result:
             return {"error": "데이터 품질 체크 실패"}
         
-        total = result.total_events
-        valid = result.valid_events
-        unknown = result.unknown_values
+        from decimal import Decimal
+        def to_int(value):
+            if isinstance(value, Decimal):
+                return int(value)
+            elif value is None:
+                return 0
+            else:
+                return int(value)
+        
+        total = to_int(result.total_events)
+        valid = to_int(result.valid_events)
+        unknown = to_int(result.unknown_values)
+        unique_users = to_int(result.unique_users)
         
         return {
             "total_events": total,
             "valid_events": valid,
             "invalid_events": total - valid,
             "unknown_values": unknown,
-            "unique_users": result.unique_users,
+            "unique_users": unique_users,
             "data_completeness": round((valid / total * 100), 1) if total > 0 else 0,
             "unknown_ratio": round((unknown / total * 100), 1) if total > 0 else 0
         }
@@ -687,23 +820,30 @@ class ChurnAnalyzer:
     
     def _generate_llm_insights_and_actions(self, analysis_data: Dict) -> Dict:
         """LLM을 활용한 인사이트 및 권장 액션 생성"""
+        print(f"[INFO] LLM 인사이트 생성 시작 - 분석 기간: {analysis_data.get('start_month')} ~ {analysis_data.get('end_month')}")
         try:
             # LLM 서비스를 통해 인사이트 생성
+            print(f"[INFO] llm_generator.generate_insights_and_actions 호출 중...")
             result = llm_generator.generate_insights_and_actions(analysis_data)
+            
+            print(f"[INFO] LLM 결과 수신 - generated_by: {result.get('generated_by')}, insights: {len(result.get('insights', []))}개, actions: {len(result.get('actions', []))}개")
             
             # LLM 결과에 메타데이터 추가
             result['llm_metadata'] = {
                 'model_used': 'gpt-4o-mini',
                 'generation_method': result.get('generated_by', 'llm'),
                 'timestamp': result.get('timestamp'),
-                'fallback_used': result.get('generated_by') == 'fallback'
+                'fallback_used': result.get('generated_by') in ['fallback', 'basic_analysis', 'no_api_key']
             }
             
             return result
             
         except Exception as e:
             # LLM 실패 시 간단한 안내 메시지만 표시
-            print(f"LLM 인사이트 생성 실패: {e}")
+            import traceback
+            error_detail = traceback.format_exc()
+            print(f"[ERROR] LLM 인사이트 생성 실패: {e}")
+            print(f"[ERROR] 상세 오류:\n{error_detail}")
             
             return {
                 'insights': [
@@ -848,16 +988,24 @@ class ChurnAnalyzer:
         
         month_trunc = self._get_month_trunc('created_at')
         extract_dow = self._get_extract_dow('created_at')
-        month_subtract = self._get_month_subtract('us.month', 1)
+        
+        # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
+        # SQLite에서는 문자열을 날짜로 변환 후 빼기
+        if self.is_mysql:
+            month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(us.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
+        elif self.is_sqlite:
+            month_subtract = "strftime('%Y-%m', datetime(us.month || '-01', '-1 month'))"
+        else:
+            month_subtract = self._get_month_subtract('us.month', 1)
         
         query = text(f"""
-        WITH user_weekday_stats AS (
-            SELECT 
-                user_hash,
-                {month_trunc} AS month,
-                COUNT(CASE WHEN {extract_dow} BETWEEN 1 AND 5 THEN 1 END) AS weekday_count,
-                COUNT(CASE WHEN {extract_dow} IN (0, 6) THEN 1 END) AS weekend_count,
-                COUNT(*) AS total_count
+            WITH user_weekday_stats AS (
+                SELECT 
+                    user_hash,
+                    {month_trunc} AS month,
+                    COUNT(CASE WHEN {extract_dow} BETWEEN 1 AND 5 THEN 1 END) AS weekday_count,
+                    COUNT(CASE WHEN {extract_dow} IN (0, 6) THEN 1 END) AS weekend_count,
+                    COUNT(*) AS total_count
             FROM events
             WHERE {month_trunc} BETWEEN :start_month AND :end_month
             GROUP BY user_hash, {month_trunc}
@@ -923,14 +1071,20 @@ class ChurnAnalyzer:
             "min_sample": self.min_sample_size
         }).fetchall()
         
+        from decimal import Decimal
+        def convert_value(value):
+            if isinstance(value, Decimal):
+                return float(value) if isinstance(value, Decimal) and value % 1 != 0 else int(value)
+            return value
+        
         return [
             {
                 "segment_value": row.segment_value,
-                "current_active": row.current_active,
-                "previous_active": row.previous_active,
-                "churned_users": row.churned_users,
-                "churn_rate": row.churn_rate,
-                "is_uncertain": row.is_uncertain
+                "current_active": int(convert_value(row.current_active)),
+                "previous_active": int(convert_value(row.previous_active)),
+                "churned_users": int(convert_value(row.churned_users)),
+                "churn_rate": float(convert_value(row.churn_rate)),
+                "is_uncertain": bool(row.is_uncertain)
             }
             for row in results
         ]
@@ -940,7 +1094,15 @@ class ChurnAnalyzer:
         
         month_trunc = self._get_month_trunc('created_at')
         extract_hour = self._get_extract_hour('created_at')
-        month_subtract = self._get_month_subtract('us.month', 1)
+        
+        # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
+        # SQLite에서는 문자열을 날짜로 변환 후 빼기
+        if self.is_mysql:
+            month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(us.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
+        elif self.is_sqlite:
+            month_subtract = "strftime('%Y-%m', datetime(us.month || '-01', '-1 month'))"
+        else:
+            month_subtract = self._get_month_subtract('us.month', 1)
         
         query = text(f"""
         WITH user_hour_stats AS (
@@ -1021,14 +1183,20 @@ class ChurnAnalyzer:
             "min_sample": self.min_sample_size
         }).fetchall()
         
+        from decimal import Decimal
+        def convert_value(value):
+            if isinstance(value, Decimal):
+                return float(value) if isinstance(value, Decimal) and value % 1 != 0 else int(value)
+            return value
+        
         return [
             {
                 "segment_value": row.segment_value,
-                "current_active": row.current_active,
-                "previous_active": row.previous_active,
-                "churned_users": row.churned_users,
-                "churn_rate": row.churn_rate,
-                "is_uncertain": row.is_uncertain
+                "current_active": int(convert_value(row.current_active)),
+                "previous_active": int(convert_value(row.previous_active)),
+                "churned_users": int(convert_value(row.churned_users)),
+                "churn_rate": float(convert_value(row.churn_rate)),
+                "is_uncertain": bool(row.is_uncertain)
             }
             for row in results
         ]
@@ -1157,7 +1325,15 @@ class ChurnAnalyzer:
         """이벤트 타입별 세그먼트 분석"""
         
         month_trunc = self._get_month_trunc('created_at')
-        month_subtract = self._get_month_subtract('us.month', 1)
+        
+        # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
+        # SQLite에서는 문자열을 날짜로 변환 후 빼기
+        if self.is_mysql:
+            month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(us.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
+        elif self.is_sqlite:
+            month_subtract = "strftime('%Y-%m', datetime(us.month || '-01', '-1 month'))"
+        else:
+            month_subtract = self._get_month_subtract('us.month', 1)
         
         query = text(f"""
         WITH user_action_stats AS (
@@ -1241,14 +1417,20 @@ class ChurnAnalyzer:
             "min_sample": self.min_sample_size
         }).fetchall()
         
+        from decimal import Decimal
+        def convert_value(value):
+            if isinstance(value, Decimal):
+                return float(value) if isinstance(value, Decimal) and value % 1 != 0 else int(value)
+            return value
+        
         return [
             {
                 "segment_value": row.segment_value,
-                "current_active": row.current_active,
-                "previous_active": row.previous_active,
-                "churned_users": row.churned_users,
-                "churn_rate": row.churn_rate,
-                "is_uncertain": row.is_uncertain
+                "current_active": int(convert_value(row.current_active)),
+                "previous_active": int(convert_value(row.previous_active)),
+                "churned_users": int(convert_value(row.churned_users)),
+                "churn_rate": float(convert_value(row.churn_rate)),
+                "is_uncertain": bool(row.is_uncertain)
             }
             for row in results
         ]

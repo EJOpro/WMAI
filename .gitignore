@@ -55,6 +55,9 @@ Thumbs.db
 *.sqlite3
 match_reports_db.json
 
+# Vector Store
+chroma_store/
+
 # Static files (if generated)
 collected_static/
 

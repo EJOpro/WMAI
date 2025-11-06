@@ -7,15 +7,21 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM 로드 완료, 초기화 시작...');
     
     // 약간의 지연을 두고 초기화 (DOM 완전 로드 보장)
-    setTimeout(() => {
+    setTimeout(async () => {
         try {
             // 차트 초기화는 분석 후에만 수행
             setupEventListeners();
-            updateStatusCards(); // 초기 상태 카드 설정
+            
+            // MySQL 데이터 상태 확인
+            await checkAndDisplayMySQLDataStatus();
+            
+            await updateStatusCards(); // 초기 상태 카드 설정
+            
+            // 요약 카드 타이틀 초기 업데이트
+            updateChurnCardTitle();
             
             // 초기 로그 추가
             addLog('시스템 초기화 완료', 'success');
-            addLog('CSV 파일을 업로드하여 분석을 시작하세요', 'info');
             
             console.log('초기화 완료 (차트는 분석 후 표시)!');
         } catch (error) {
@@ -56,8 +62,8 @@ function setupEventListeners() {
     safeAddEventListener('runAnalysisBtn', 'click', runAnalysis);
     
     // 설정 변경 감지
-    safeAddEventListener('startDate', 'change', updateDateRange);
-    safeAddEventListener('endDate', 'change', updateDateRange);
+    safeAddEventListener('startMonth', 'change', updateMonthRange);
+    safeAddEventListener('endMonth', 'change', updateMonthRange);
     
     // 세그먼트 체크박스
     safeAddEventListener('channelSegment', 'change', updateSegmentOptions);
@@ -118,8 +124,9 @@ function uploadFile() {
                 updateProgressBar(25, '데이터 업로드 완료');
                 
                 // 상태 카드 즉시 업데이트
-                updateStatusCards();
-                addLog('대시보드 상태 업데이트 완료', 'info');
+                updateStatusCards().then(() => {
+                    addLog('대시보드 상태 업데이트 완료', 'info');
+                });
             } else {
                 addLog(`파일 업로드 실패: ${result.error}`, 'danger');
                 showAlert(`업로드 실패: ${result.error}`, 'danger');
@@ -288,12 +295,15 @@ async function uploadToBackend(data) {
 }
 
 // 분석 실행
-function runAnalysis() {
+async function runAnalysis() {
     if (isAnalysisRunning) return;
     
-    const fileInput = document.getElementById('csvFile');
-    if (!fileInput.files[0]) {
-        showAlert('먼저 CSV 파일을 업로드해주세요.', 'warning');
+    // MySQL 데이터 상태 확인
+    const dataStatus = await checkBackendDataStatus();
+    const hasCSVData = window.csvData && window.csvData.length > 0;
+    
+    if (!dataStatus.has_data && !hasCSVData) {
+        showAlert('분석할 데이터가 없습니다. CSV 파일을 업로드하거나 MySQL 데이터베이스에 데이터가 있는지 확인해주세요.', 'warning');
         return;
     }
     
@@ -378,7 +388,11 @@ function completeAnalysis() {
 
 // 지표 카드 업데이트 (백엔드 API 사용)
 async function updateMetricCards() {
-    if (!window.csvData || window.csvData.length === 0) {
+    // MySQL 데이터 상태 확인
+    const dataStatus = await checkBackendDataStatus();
+    const hasCSVData = window.csvData && window.csvData.length > 0;
+    
+    if (!dataStatus.has_data && !hasCSVData) {
         // 메트릭 카드 숨기기
         document.getElementById('metricsRow').style.display = 'none';
         addLog('데이터가 없어서 지표를 표시하지 않습니다.', 'warning');
@@ -403,26 +417,46 @@ async function updateMetricCards() {
         };
         
         // 세그먼트 분석 결과를 별도 API로 가져오기
-        // 날짜를 월 형식으로 변환
-        const startMonth = config.startDate ? config.startDate.substring(0, 7) : '2025-08';
-        const endMonth = config.endDate ? config.endDate.substring(0, 7) : '2025-10';
+        const startMonth = config.startMonth || '2025-08';
+        const endMonth = config.endMonth || '2025-10';
         
-        try {
-            const segmentResponse = await fetch(`/api/churn/analysis/segments?start_month=${startMonth}&end_month=${endMonth}`);
-            if (segmentResponse.ok) {
-                const segmentData = await segmentResponse.json();
-                window.currentSegmentAnalysis = segmentData;
-                console.log('[DEBUG] 세그먼트 분석 결과 저장 (별도 API):', window.currentSegmentAnalysis);
-                console.log('[DEBUG] - channel:', segmentData.channel);
-                console.log('[DEBUG] - action:', segmentData.action);
-                console.log('[DEBUG] - weekday_pattern:', segmentData.weekday_pattern);
-                console.log('[DEBUG] - time_pattern:', segmentData.time_pattern);
-                console.log('[DEBUG] - action_type:', segmentData.action_type);
+        // 선택된 세그먼트 확인
+        const channelSelected = config.segments?.channel || false;
+        const actionTypeSelected = config.segments?.action_type || false;
+        
+        // 선택된 세그먼트가 있으면 API 호출
+        if (channelSelected || actionTypeSelected) {
+            try {
+                const params = new URLSearchParams({
+                    start_month: startMonth,
+                    end_month: endMonth,
+                    channel: channelSelected ? 'true' : 'false',
+                    action_type: actionTypeSelected ? 'true' : 'false'
+                });
                 
-                // 세그먼트 분석 결과를 화면에 표시
-                displaySegmentAnalysisResults(segmentData);
-            } else {
-                console.warn('[WARNING] 세그먼트 분석 API 호출 실패:', segmentResponse.status);
+                const segmentResponse = await fetch(`/api/churn/analysis/segments?${params}`);
+                if (segmentResponse.ok) {
+                    const segmentData = await segmentResponse.json();
+                    window.currentSegmentAnalysis = segmentData;
+                    console.log('[DEBUG] 세그먼트 분석 결과 저장 (별도 API):', window.currentSegmentAnalysis);
+                    console.log('[DEBUG] - channel:', segmentData.channel);
+                    console.log('[DEBUG] - action_type:', segmentData.action_type);
+                    console.log('[DEBUG] - weekday_pattern:', segmentData.weekday_pattern);
+                    console.log('[DEBUG] - time_pattern:', segmentData.time_pattern);
+                    
+                    // 세그먼트 분석 결과를 화면에 표시
+                    displaySegmentAnalysisResults(segmentData);
+                } else {
+                    console.warn('[WARNING] 세그먼트 분석 API 호출 실패:', segmentResponse.status);
+                    // 백엔드 응답의 segments 객체 사용 (fallback)
+                    if (backendResponse.segments) {
+                        window.currentSegmentAnalysis = backendResponse.segments;
+                        console.log('[DEBUG] 세그먼트 분석 결과 저장 (fallback):', window.currentSegmentAnalysis);
+                        displaySegmentAnalysisResults(backendResponse.segments);
+                    }
+                }
+            } catch (error) {
+                console.error('[ERROR] 세그먼트 분석 API 호출 중 오류:', error);
                 // 백엔드 응답의 segments 객체 사용 (fallback)
                 if (backendResponse.segments) {
                     window.currentSegmentAnalysis = backendResponse.segments;
@@ -430,14 +464,8 @@ async function updateMetricCards() {
                     displaySegmentAnalysisResults(backendResponse.segments);
                 }
             }
-        } catch (error) {
-            console.error('[ERROR] 세그먼트 분석 API 호출 중 오류:', error);
-            // 백엔드 응답의 segments 객체 사용 (fallback)
-            if (backendResponse.segments) {
-                window.currentSegmentAnalysis = backendResponse.segments;
-                console.log('[DEBUG] 세그먼트 분석 결과 저장 (fallback):', window.currentSegmentAnalysis);
-                displaySegmentAnalysisResults(backendResponse.segments);
-            }
+        } else {
+            console.log('[INFO] 세그먼트 분석이 선택되지 않았습니다.');
         }
         
         // 백엔드 오류 또는 빈 데이터인 경우 프론트엔드 계산 사용
@@ -447,13 +475,18 @@ async function updateMetricCards() {
         
         if (isBackendDataEmpty) {
             if (metrics.error) {
-                console.warn('[WARNING] 백엔드 계산 실패, 프론트엔드 계산 사용');
+                console.warn('[WARNING] 백엔드 계산 실패');
             }
-            // 폴백으로 프론트엔드 계산 사용
-            const fallbackMetrics = calculateMetrics(window.csvData, config);
-            console.log('[DEBUG] 프론트엔드 계산 결과:', fallbackMetrics);
-            updateMetricCardsWithData(fallbackMetrics, config);
-            addLog('프론트엔드 로컬 계산 완료', 'success');
+            // CSV 데이터가 있으면 프론트엔드 계산 사용, 없으면 에러 메시지
+            if (hasCSVData) {
+                const fallbackMetrics = calculateMetrics(window.csvData, config);
+                console.log('[DEBUG] 프론트엔드 계산 결과:', fallbackMetrics);
+                updateMetricCardsWithData(fallbackMetrics, config);
+                addLog('프론트엔드 로컬 계산 완료', 'success');
+            } else {
+                addLog('MySQL 데이터가 있지만 분석 결과를 가져올 수 없습니다. 데이터 범위를 확인해주세요.', 'warning');
+                document.getElementById('metricsRow').style.display = 'none';
+            }
             return;
         }
         
@@ -468,14 +501,18 @@ async function updateMetricCards() {
     } catch (error) {
         addLog(`API 호출 실패: ${error.message}`, 'warning');
         
-        // 폴백으로 프론트엔드 계산 사용
-        const config = getCurrentConfig();
-        console.log('[DEBUG] 폴백 계산 - 설정:', config);
-        const metrics = calculateMetrics(window.csvData, config);
-        console.log('[DEBUG] 폴백 계산 - 결과:', metrics);
-        updateMetricCardsWithData(metrics, config);
-        
-        addLog('로컬 계산으로 폴백 실행', 'info');
+        // CSV 데이터가 있으면 프론트엔드 계산 사용, 없으면 에러 메시지
+        if (hasCSVData) {
+            const fallbackConfig = getCurrentConfig();
+            console.log('[DEBUG] 폴백 계산 - 설정:', fallbackConfig);
+            const fallbackMetrics = calculateMetrics(window.csvData, fallbackConfig);
+            console.log('[DEBUG] 폴백 계산 - 결과:', fallbackMetrics);
+            updateMetricCardsWithData(fallbackMetrics, fallbackConfig);
+            addLog('로컬 계산으로 폴백 실행', 'info');
+        } else {
+            addLog('MySQL 데이터 분석 중 오류가 발생했습니다. 데이터 범위를 확인해주세요.', 'error');
+            document.getElementById('metricsRow').style.display = 'none';
+        }
     }
 }
 
@@ -500,6 +537,30 @@ function updateMetricCardsWithData(metrics, config) {
     };
     
     updateAdvancedMetrics(normalizedMetrics, config);
+    
+    // 요약 카드 타이틀 업데이트
+    updateChurnCardTitle();
+}
+
+// 요약 카드 타이틀 업데이트
+function updateChurnCardTitle() {
+    const config = getCurrentConfig();
+    const titleElement = document.getElementById('churnCardTitle');
+    
+    if (!titleElement) return;
+    
+    const endMonth = config.endMonth;
+    if (!endMonth) {
+        titleElement.textContent = 'Churn (Last: - vs -)';
+        return;
+    }
+    
+    // 이전 월 계산
+    const endDate = new Date(endMonth + '-01');
+    endDate.setMonth(endDate.getMonth() - 1);
+    const prevMonth = endDate.toISOString().substring(0, 7);
+    
+    titleElement.textContent = `Churn (Last: ${endMonth} vs ${prevMonth})`;
 }
 
 // 백엔드 데이터 상태 확인
@@ -524,13 +585,14 @@ async function callBackendAPI(config) {
     const dataStatus = await checkBackendDataStatus();
     
     if (!dataStatus.has_data) {
-        throw new Error('데이터베이스에 데이터가 없습니다. CSV 파일을 먼저 업로드해주세요.');
+        // CSV 데이터가 있으면 계속 진행
+        if (!window.csvData || window.csvData.length === 0) {
+            throw new Error('데이터베이스에 데이터가 없습니다. CSV 파일을 업로드하거나 MySQL 데이터를 생성해주세요.');
+        }
     }
     
-    // 날짜를 월 형식으로 변환 (백엔드는 아직 월 단위)
-    const startMonth = config.startDate ? config.startDate.substring(0, 7) : '2025-08';
-    const endMonth = config.endDate ? config.endDate.substring(0, 7) : '2025-10';
-
+    const startMonth = config.startMonth || '2025-08';
+    const endMonth = config.endMonth || '2025-10';
     const inactivityThresholds = [30, 60, 90];
     
     const requestData = {
@@ -584,9 +646,9 @@ async function clearBackendCache() {
 }
 
 // 상태 카드 업데이트
-function updateStatusCards() {
-    // 데이터 상태 업데이트
-    updateDataStatus();
+async function updateStatusCards() {
+    // 데이터 상태 업데이트 (async)
+    await updateDataStatus();
     
     // 기간 상태 업데이트
     updatePeriodStatus();
@@ -596,23 +658,61 @@ function updateStatusCards() {
     updateAnalysisStatus();
 }
 
+// MySQL 데이터 상태 확인 및 표시
+async function checkAndDisplayMySQLDataStatus() {
+    try {
+        const dataStatus = await checkBackendDataStatus();
+        
+        if (dataStatus.has_data) {
+            // MySQL 데이터가 있으면 CSV 업로드 섹션 숨기기
+            const uploadCard = document.querySelector('.card:has(#csvFile)');
+            if (uploadCard) {
+                uploadCard.style.display = 'none';
+            }
+            
+            addLog(`MySQL 데이터베이스에 ${dataStatus.total_events.toLocaleString()}개의 이벤트가 있습니다 (사용자: ${dataStatus.unique_users}명)`, 'success');
+            
+            // 데이터 범위 표시
+            if (dataStatus.oldest_date && dataStatus.latest_date) {
+                addLog(`데이터 기간: ${new Date(dataStatus.oldest_date).toLocaleDateString()} ~ ${new Date(dataStatus.latest_date).toLocaleDateString()}`, 'info');
+            }
+        } else {
+            addLog('MySQL 데이터베이스에 데이터가 없습니다. CSV 파일을 업로드하거나 데이터를 생성해주세요.', 'info');
+        }
+    } catch (error) {
+        console.error('MySQL 데이터 상태 확인 실패:', error);
+        addLog('MySQL 데이터 상태 확인 실패', 'warning');
+    }
+}
+
 // 데이터 상태 업데이트
-function updateDataStatus() {
+async function updateDataStatus() {
     const dataStatus = document.getElementById('dataStatus');
     const dataInfo = document.getElementById('dataInfo');
     
+    // MySQL 데이터 상태 확인
+    const mysqlStatus = await checkBackendDataStatus();
+    
     if (window.csvData && window.csvData.length > 0) {
-        dataStatus.textContent = '로드됨';
+        dataStatus.textContent = '로드됨 (CSV)';
         dataStatus.className = 'card-title text-success';
         dataInfo.textContent = `${window.csvData.length.toLocaleString()}행 데이터`;
         
         // 아이콘 색상 변경 (스피너에서 파일 아이콘으로 복원)
         const icon = dataStatus.parentElement.querySelector('i[class*="fa-"]');
         if (icon) icon.className = 'fas fa-file-csv fa-2x text-success mb-2';
+    } else if (mysqlStatus.has_data) {
+        dataStatus.textContent = '로드됨 (MySQL)';
+        dataStatus.className = 'card-title text-success';
+        dataInfo.textContent = `${mysqlStatus.total_events.toLocaleString()}개 이벤트 (${mysqlStatus.unique_users}명 사용자)`;
+        
+        // 아이콘을 데이터베이스 아이콘으로 변경
+        const icon = dataStatus.parentElement.querySelector('i[class*="fa-"]');
+        if (icon) icon.className = 'fas fa-database fa-2x text-success mb-2';
     } else {
-        dataStatus.textContent = '파일 없음';
+        dataStatus.textContent = '데이터 없음';
         dataStatus.className = 'card-title text-secondary';
-        dataInfo.textContent = 'CSV 파일을 업로드하세요';
+        dataInfo.textContent = 'CSV 파일을 업로드하거나 MySQL 데이터를 확인하세요';
         
         // 아이콘 색상 원복
         const icon = dataStatus.parentElement.querySelector('i[class*="fa-"]');
@@ -660,17 +760,17 @@ function updateDataStatusForUploading(file) {
 function updatePeriodStatus() {
     const periodStatus = document.getElementById('periodStatus');
     const periodInfo = document.getElementById('periodInfo');
-    const startDate = document.getElementById('startDate').value;
-    const endDate = document.getElementById('endDate').value;
+    const startMonth = document.getElementById('startMonth').value;
+    const endMonth = document.getElementById('endMonth').value;
     
-    if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+    if (startMonth && endMonth) {
+        const start = new Date(startMonth + '-01');
+        const end = new Date(endMonth + '-01');
+        const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
         
         periodStatus.textContent = '설정됨';
         periodStatus.className = 'card-title text-success';
-        periodInfo.textContent = `${diffDays}일 기간`;
+        periodInfo.textContent = `${diffMonths + 1}개월 기간`;
         
         // 아이콘 색상 변경
         const icon = periodStatus.parentElement.querySelector('i[class*="fa-"]');
@@ -678,7 +778,7 @@ function updatePeriodStatus() {
     } else {
         periodStatus.textContent = '미설정';
         periodStatus.className = 'card-title text-secondary';
-        periodInfo.textContent = '날짜를 선택하세요';
+        periodInfo.textContent = '월을 선택하세요';
         
         // 아이콘 색상 원복
         const icon = periodStatus.parentElement.querySelector('i[class*="fa-"]');
@@ -964,23 +1064,25 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// 설정 변경 핸들러
-async function updateDateRange() {
-    const startDate = document.getElementById('startDate').value;
-    const endDate = document.getElementById('endDate').value;
+// 월 범위 변경 핸들러
+async function updateMonthRange() {
+    const startMonth = document.getElementById('startMonth').value;
+    const endMonth = document.getElementById('endMonth').value;
     
-    if (startDate && endDate) {
-        if (startDate > endDate) {
-            showAlert('시작일이 종료일보다 늦을 수 없습니다.', 'warning');
+    console.log('[UI] startMonth=' + startMonth + ', endMonth=' + endMonth);
+    
+    if (startMonth && endMonth) {
+        if (startMonth > endMonth) {
+            showAlert('시작월이 종료월보다 늦을 수 없습니다.', 'warning');
             return;
         }
         
-        // 날짜 차이 계산
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+        // 월 차이 계산
+        const start = new Date(startMonth + '-01');
+        const end = new Date(endMonth + '-01');
+        const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
         
-        addLog(`분석 기간 변경: ${startDate} ~ ${endDate} (${diffDays}일)`, 'info');
+        addLog(`분석 기간 변경: ${startMonth} ~ ${endMonth} (${diffMonths + 1}개월)`, 'info');
         
         // 캐시 무효화
         try {
@@ -994,17 +1096,19 @@ async function updateDateRange() {
         window.currentSegmentAnalysis = null;
         
         // 상태 카드 업데이트
-        updateStatusCards();
+        await updateStatusCards();
+        
+        // 요약 카드 타이틀 업데이트
+        updateChurnCardTitle();
         
         // 데이터가 있고 분석이 완료된 상태라면 메트릭을 즉시 재계산
         if (window.csvData && window.csvData.length > 0) {
-            addLog('날짜 변경으로 인한 메트릭 재계산 중...', 'info');
+            addLog('월 변경으로 인한 메트릭 재계산 중...', 'info');
             await updateMetricCards();
             addLog('메트릭 재계산 완료', 'success');
         }
     }
 }
-
 
 async function updateSegmentOptions() {
     const channelElement = document.getElementById('channelSegment');
@@ -1070,6 +1174,19 @@ function calculateMetrics(data, config = {}) {
     console.log(`[DEBUG] calculateMetrics 호출됨 - 기간: ${startDate} ~ ${endDate}`);
     console.log(`[DEBUG] 설정:`, config);
     console.log(`[DEBUG] 세그먼트 설정:`, config.segments);
+    
+    // 데이터 유효성 검사
+    if (!data || !Array.isArray(data) || data.length === 0) {
+        console.warn('[WARNING] calculateMetrics: 데이터가 없습니다');
+        return {
+            churnRate: 0,
+            activeUsers: 0,
+            reactivatedUsers: 0,
+            longTermInactive: 0,
+            previousActiveUsers: 0
+        };
+    }
+    
     console.log(`[DEBUG] 데이터 행 수: ${data.length}`);
     console.log(`[DEBUG] 비활성 임계값: ${inactivityThreshold}일`);
     
@@ -1290,9 +1407,12 @@ function calculateLongTermInactive(data, currentMonth, inactivityDays = 90) {
 
 // 현재 UI 설정 가져오기
 function getCurrentConfig() {
+    const startMonth = document.getElementById('startMonth').value;
+    const endMonth = document.getElementById('endMonth').value;
+    
     return {
-        startDate: document.getElementById('startDate').value,
-        endDate: document.getElementById('endDate').value,
+        startMonth: startMonth,
+        endMonth: endMonth,
         segments: {
             channel: document.getElementById('channelSegment') ? document.getElementById('channelSegment').checked : false,
             action_type: document.getElementById('actionType') ? document.getElementById('actionType').checked : false
@@ -1364,8 +1484,9 @@ function displaySegmentAnalysisResults(segmentData) {
         
         segment.forEach(item => {
             const churnRate = item.churn_rate ? item.churn_rate.toFixed(2) : '0.00';
-            const activeUsers = item.active_users || 0;
-            const churnedUsers = item.churned_users || 0;
+            // 백엔드에서 current_active를 반환하므로 두 필드 모두 확인
+            const activeUsers = item.current_active || item.active_users || 0;
+            const churnedUsers = item.churned_users || item.churned || 0;
             
             html += `
                 <li class="mb-2" style="margin-left: 1rem;">
@@ -1836,10 +1957,18 @@ function generateDynamicActions(insights, segmentAnalysis, metrics) {
 
 // 리포트를 동적 데이터로 업데이트
 async function updateReportWithDynamicData() {
-    if (!window.csvData || window.csvData.length === 0) {
-        updateReportSection(['데이터가 없습니다.'], ['데이터를 업로드해주세요.'], { total_events: 0, invalid_events: 0, data_completeness: 0, unknown_ratio: 0 });
+    // MySQL 데이터 상태 확인
+    const dataStatus = await checkBackendDataStatus();
+    const hasCSVData = window.csvData && window.csvData.length > 0;
+    
+    if (!dataStatus.has_data && !hasCSVData) {
+        updateReportSection(['데이터가 없습니다.'], ['데이터를 업로드하거나 MySQL 데이터를 생성해주세요.'], { total_events: 0, invalid_events: 0, data_completeness: 0, unknown_ratio: 0 });
         return;
     }
+    
+    // MySQL 데이터만 있는 경우 CSV 데이터 없이도 진행
+    // dataQuality는 MySQL 데이터에서는 계산 불가하므로 기본값 사용
+    const dataQuality = hasCSVData ? calculateDataQuality(window.csvData) : { total_events: dataStatus.total_events || 0, invalid_events: 0, data_completeness: 100, unknown_ratio: 0 };
     
     const config = getCurrentConfig();
     
@@ -1854,10 +1983,23 @@ async function updateReportWithDynamicData() {
              backendResponse.reactivated_users === 0 && backendResponse.long_term_inactive === 0);
         
         if (isBackendDataEmpty) {
-            // 백엔드 실패 시 프론트엔드 계산 사용
-            finalMetrics = calculateMetrics(window.csvData, config);
-            segmentAnalysis = calculateSegmentAnalysis(window.csvData, config);
-            addLog('리포트: 로컬 계산된 메트릭 사용', 'info');
+            // 백엔드 실패 시 CSV 데이터가 있으면 프론트엔드 계산 사용
+            if (hasCSVData) {
+                finalMetrics = calculateMetrics(window.csvData, config);
+                segmentAnalysis = calculateSegmentAnalysis(window.csvData, config);
+                addLog('리포트: 로컬 계산된 메트릭 사용', 'info');
+            } else {
+                // MySQL 데이터만 있고 백엔드 실패한 경우
+                addLog('리포트: 백엔드 분석 실패. 데이터 범위를 확인해주세요.', 'warning');
+                finalMetrics = {
+                    churnRate: 0,
+                    activeUsers: 0,
+                    reactivatedUsers: 0,
+                    longTermInactive: 0,
+                    previousActiveUsers: 0
+                };
+                segmentAnalysis = {};
+            }
         } else {
             // 백엔드 성공 시 백엔드 메트릭과 세그먼트 데이터 사용
             finalMetrics = {
@@ -1868,28 +2010,43 @@ async function updateReportWithDynamicData() {
                 previousActiveUsers: backendResponse.previous_active_users || 0
             };
             
-            // 백엔드에서 세그먼트 분석 결과가 있으면 사용, 없으면 프론트엔드 계산
+            // 백엔드에서 세그먼트 분석 결과가 있으면 사용, 없으면 CSV 데이터가 있을 때만 프론트엔드 계산
             if (backendResponse.segments) {
                 segmentAnalysis = backendResponse.segments;
                 addLog('리포트: 백엔드 세그먼트 분석 결과 사용', 'success');
-            } else {
+            } else if (hasCSVData) {
                 segmentAnalysis = calculateSegmentAnalysis(window.csvData, config);
                 addLog('리포트: 백엔드 메트릭 + 로컬 세그먼트 분석 사용', 'info');
+            } else {
+                segmentAnalysis = {};
+                addLog('리포트: 세그먼트 분석 결과가 없습니다', 'info');
             }
             addLog('리포트: 백엔드 계산된 메트릭 사용', 'success');
         }
     } catch (error) {
-        // API 호출 실패 시 프론트엔드 계산 사용
-        finalMetrics = calculateMetrics(window.csvData, config);
-        segmentAnalysis = calculateSegmentAnalysis(window.csvData, config);
-        addLog('리포트: API 실패로 로컬 메트릭 사용', 'warning');
+        // API 호출 실패 시 CSV 데이터가 있으면 프론트엔드 계산 사용
+        if (hasCSVData) {
+            finalMetrics = calculateMetrics(window.csvData, config);
+            segmentAnalysis = calculateSegmentAnalysis(window.csvData, config);
+            addLog('리포트: API 실패로 로컬 메트릭 사용', 'warning');
+        } else {
+            addLog(`리포트: API 호출 실패 - ${error.message}`, 'error');
+            finalMetrics = {
+                churnRate: 0,
+                activeUsers: 0,
+                reactivatedUsers: 0,
+                longTermInactive: 0,
+                previousActiveUsers: 0
+            };
+            segmentAnalysis = {};
+        }
     }
     
     console.log('[DEBUG] 리포트용 최종 메트릭:', finalMetrics);
     console.log('[DEBUG] 리포트용 세그먼트 분석:', segmentAnalysis);
     
-    // 차트 데이터 계산 제거됨
-    const dataQuality = calculateDataQuality(window.csvData);
+        // 차트 데이터 계산 제거됨
+    // dataQuality는 이미 위에서 계산됨
     
     // 백엔드 API 호출하여 LLM 기반 인사이트 생성 (실제 메트릭 포함)
     try {
@@ -1901,8 +2058,8 @@ async function updateReportWithDynamicData() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                start_month: config.startDate.substring(0, 7), // YYYY-MM 형식
-                end_month: config.endDate.substring(0, 7),
+                start_month: config.startMonth || '2025-08', // YYYY-MM 형식
+                end_month: config.endMonth || '2025-10',
                 segments: {
                     channel: config.segments.channel || false,
                     action_type: config.segments.action_type || false
@@ -2137,7 +2294,7 @@ function generateBasicActions(metrics, segmentAnalysis) {
 // 계산 검증 리포트 표시
 async function showVerificationReport() {
     const config = getCurrentConfig();
-    const endMonth = config.endDate ? config.endDate.substring(0, 7) : '2025-10';
+    const endMonth = config.endMonth || '2025-10';
     
     const verificationCard = document.getElementById('verificationReportCard');
     const verificationContent = document.getElementById('verificationReportContent');
