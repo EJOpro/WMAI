@@ -5,8 +5,10 @@ import torch
 import json
 import sys
 import io
+import os
 from transformers import BertTokenizer
 from ethics.ethics_train_model import EthicsClassifier
+from ethics.model_downloader import ensure_model_exists
 
 # Windows 환경에서 UTF-8 출력 설정
 if sys.platform == 'win32':
@@ -18,6 +20,16 @@ class EthicsPredictor:
     def __init__(self, model_path='ethics/models/binary_classifier.pth', 
                  config_path='ethics/models/config.json'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # 모델 파일이 없으면 자동 다운로드
+        if not os.path.exists(model_path):
+            print(f"[WARN] 모델 파일을 찾을 수 없습니다: {model_path}")
+            print(f"[INFO] Google Drive에서 자동 다운로드를 시도합니다...")
+            if not ensure_model_exists(model_path):
+                raise FileNotFoundError(
+                    f"모델 파일을 다운로드할 수 없습니다: {model_path}\n"
+                    f"수동으로 다운로드하세요: https://drive.google.com/file/d/1paWpYv5umu0zmmjsC4gyM7HL248tShEh/view"
+                )
         
         # 설정 로드
         with open(config_path, 'r', encoding='utf-8') as f:

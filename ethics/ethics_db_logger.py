@@ -80,14 +80,15 @@ class DatabaseLogger:
             CREATE TABLE IF NOT EXISTS ethics_logs (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 text TEXT NOT NULL,
-                score DOUBLE NOT NULL,
-                confidence DOUBLE NOT NULL,
-                spam DOUBLE NOT NULL,
+                score DOUBLE DEFAULT NULL,
+                confidence DOUBLE DEFAULT NULL,
+                spam DOUBLE DEFAULT NULL,
                 spam_confidence DOUBLE DEFAULT NULL,
                 types TEXT,
                 ip_address VARCHAR(50) DEFAULT NULL,
                 user_agent TEXT,
                 response_time DOUBLE DEFAULT NULL,
+                rag_applied TINYINT(1) DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_ethics_created_at (created_at DESC),
                 INDEX idx_ethics_score (score),
@@ -108,6 +109,85 @@ class DatabaseLogger:
         except pymysql.err.OperationalError:
             # spam_confidence 컬럼이 이미 있으면 무시
             pass
+
+        # RAG 관련 컬럼 추가 (마이그레이션)
+        try:
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN rag_applied TINYINT(1) DEFAULT 0")
+        except pymysql.err.OperationalError:
+            pass
+        
+        # 자동 차단 컬럼 추가 (마이그레이션)
+        try:
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN auto_blocked TINYINT(1) DEFAULT 0")
+        except pymysql.err.OperationalError:
+            pass
+        
+        # spam 컬럼 NULL 허용으로 변경 (마이그레이션)
+        try:
+            cursor.execute("ALTER TABLE ethics_logs MODIFY COLUMN spam DOUBLE DEFAULT NULL")
+        except pymysql.err.OperationalError:
+            pass
+        
+        # score, confidence 컬럼 NULL 허용으로 변경 (마이그레이션)
+        try:
+            cursor.execute("ALTER TABLE ethics_logs MODIFY COLUMN score DOUBLE DEFAULT NULL")
+        except pymysql.err.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE ethics_logs MODIFY COLUMN confidence DOUBLE DEFAULT NULL")
+        except pymysql.err.OperationalError:
+            pass
+        
+        # 관리자 확정 관련 컬럼 추가 (마이그레이션)
+        try:
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN admin_confirmed TINYINT(1) DEFAULT 0")
+        except pymysql.err.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN confirmed_type VARCHAR(20) DEFAULT NULL")
+        except pymysql.err.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN confirmed_at DATETIME DEFAULT NULL")
+        except pymysql.err.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE ethics_logs ADD COLUMN confirmed_by INT DEFAULT NULL")
+        except pymysql.err.OperationalError:
+            pass
+        
+        # RAG 로그 테이블 생성 (마이그레이션)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ethics_rag_logs (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                ethics_log_id BIGINT NOT NULL,
+                similar_case_count INT DEFAULT 0,
+                max_similarity DOUBLE DEFAULT NULL,
+                original_immoral_score DOUBLE DEFAULT NULL,
+                original_spam_score DOUBLE DEFAULT NULL,
+                adjusted_immoral_score DOUBLE DEFAULT NULL,
+                adjusted_spam_score DOUBLE DEFAULT NULL,
+                adjustment_weight DOUBLE DEFAULT NULL,
+                confidence_boost DOUBLE DEFAULT NULL,
+                adjustment_method VARCHAR(50) DEFAULT 'similarity_based',
+                similar_cases JSON DEFAULT NULL,
+                rag_response_time DOUBLE DEFAULT NULL,
+                vector_search_time DOUBLE DEFAULT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_rag_ethics_log 
+                    FOREIGN KEY (ethics_log_id) 
+                    REFERENCES ethics_logs(id) 
+                    ON DELETE CASCADE,
+                INDEX idx_rag_ethics_log (ethics_log_id),
+                INDEX idx_rag_created_at (created_at DESC),
+                INDEX idx_rag_similarity (max_similarity),
+                INDEX idx_rag_case_count (similar_case_count)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
         
         conn.commit()
         conn.close()
@@ -117,14 +197,16 @@ class DatabaseLogger:
     def log_analysis(
         self,
         text: str,
-        score: float,
-        confidence: float,
-        spam: float,
-        types: List[str],
+        score: float = None,
+        confidence: float = None,
+        spam: float = None,
+        types: List[str] = None,
         spam_confidence: float = None,
         ip_address: str = None,
         user_agent: str = None,
-        response_time: float = None
+        response_time: float = None,
+        rag_applied: bool = False,
+        auto_blocked: bool = False,
     ) -> int:
         """
         분석 로그 저장
@@ -139,6 +221,8 @@ class DatabaseLogger:
             ip_address: 클라이언트 IP
             user_agent: User Agent
             response_time: 응답 시간(초)
+            rag_applied: RAG 보정 적용 여부
+            auto_blocked: 자동 차단 여부 (LLM 미사용)
         
         Returns:
             생성된 로그 ID
@@ -146,13 +230,25 @@ class DatabaseLogger:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        types_json = json.dumps(types, ensure_ascii=False)
+        types_json = json.dumps(types if types is not None else [], ensure_ascii=False)
         
         cursor.execute("""
             INSERT INTO ethics_logs 
-            (text, score, confidence, spam, spam_confidence, types, ip_address, user_agent, response_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (text, score, confidence, spam, spam_confidence, types_json, ip_address, user_agent, response_time))
+            (text, score, confidence, spam, spam_confidence, types, ip_address, user_agent, response_time, rag_applied, auto_blocked)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            text,
+            score,
+            confidence,
+            spam,
+            spam_confidence,
+            types_json,
+            ip_address,
+            user_agent,
+            response_time,
+            1 if rag_applied else 0,
+            1 if auto_blocked else 0
+        ))
         
         log_id = cursor.lastrowid
         conn.commit()
@@ -266,6 +362,22 @@ class DatabaseLogger:
             AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
         """, (days,))
         spam_count = cursor.fetchone()['count']
+
+        # RAG 보정 적용 건수
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM ethics_logs
+            WHERE rag_applied = 1
+            AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+        """, (days,))
+        rag_applied_count = cursor.fetchone()['count']
+        
+        # 즉시 차단 건수 (auto_blocked = 1)
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM ethics_logs
+            WHERE auto_blocked = 1
+            AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+        """, (days,))
+        auto_blocked_count = cursor.fetchone()['count']
         
         # 일별 통계
         cursor.execute("""
@@ -288,7 +400,18 @@ class DatabaseLogger:
         ]
         
         conn.close()
-        
+
+        # RAG 벡터DB 통계
+        try:
+            from ethics.ethics_vector_db import get_client, get_collection_stats
+            vector_client = get_client()
+            rag_stats = get_collection_stats(vector_client)
+        except Exception as rag_error:
+            rag_stats = {
+                'status': 'error',
+                'error': str(rag_error)
+            }
+
         return {
             'period_days': days,
             'total_count': total_count,
@@ -297,7 +420,10 @@ class DatabaseLogger:
             'avg_spam': round(avgs['avg_spam'], 1) if avgs['avg_spam'] else 0,
             'high_risk_count': high_risk_count,
             'spam_count': spam_count,
-            'daily_stats': daily_stats
+            'rag_applied_count': rag_applied_count,
+            'auto_blocked_count': auto_blocked_count,
+            'daily_stats': daily_stats,
+            'rag_stats': rag_stats
         }
     
     def delete_log(self, log_id: int) -> bool:
@@ -360,6 +486,227 @@ class DatabaseLogger:
         conn.commit()
         conn.close()
         return deleted_count
+    
+    def log_rag_details(
+        self,
+        ethics_log_id: int,
+        similar_case_count: int,
+        max_similarity: float,
+        original_immoral_score: float,
+        original_spam_score: float,
+        adjusted_immoral_score: float,
+        adjusted_spam_score: float,
+        adjustment_weight: float,
+        confidence_boost: float,
+        similar_cases: List[Dict] = None,
+        rag_response_time: float = None,
+        vector_search_time: float = None,
+        adjustment_method: str = 'similarity_based'
+    ) -> int:
+        """
+        RAG 보정 상세 정보 저장
+        
+        Args:
+            ethics_log_id: 연결된 ethics_logs의 ID
+            similar_case_count: 검색된 유사 케이스 개수
+            max_similarity: 최대 유사도 점수 (0-1)
+            original_immoral_score: RAG 보정 전 비윤리 점수
+            original_spam_score: RAG 보정 전 스팸 점수
+            adjusted_immoral_score: RAG 보정 후 비윤리 점수
+            adjusted_spam_score: RAG 보정 후 스팸 점수
+            adjustment_weight: 보정 가중치 (0-1)
+            confidence_boost: 신뢰도 증가량
+            similar_cases: 유사 케이스 상세 정보
+            rag_response_time: RAG 처리 시간 (초)
+            vector_search_time: 벡터 검색 시간 (초)
+            adjustment_method: 보정 방법
+        
+        Returns:
+            생성된 RAG 로그 ID
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        similar_cases_json = json.dumps(similar_cases, ensure_ascii=False) if similar_cases else None
+        
+        cursor.execute("""
+            INSERT INTO ethics_rag_logs 
+            (ethics_log_id, similar_case_count, max_similarity,
+             original_immoral_score, original_spam_score,
+             adjusted_immoral_score, adjusted_spam_score,
+             adjustment_weight, confidence_boost,
+             similar_cases, rag_response_time, vector_search_time,
+             adjustment_method)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            ethics_log_id, similar_case_count, max_similarity,
+            original_immoral_score, original_spam_score,
+            adjusted_immoral_score, adjusted_spam_score,
+            adjustment_weight, confidence_boost,
+            similar_cases_json, rag_response_time, vector_search_time,
+            adjustment_method
+        ))
+        
+        rag_log_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return rag_log_id
+    
+    def get_rag_details(self, ethics_log_id: int) -> Optional[Dict]:
+        """
+        특정 로그의 RAG 상세 정보 조회
+        
+        Args:
+            ethics_log_id: ethics_logs의 ID
+        
+        Returns:
+            RAG 상세 정보 딕셔너리 또는 None
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT * FROM ethics_rag_logs 
+            WHERE ethics_log_id = %s
+        """, (ethics_log_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        rag_details = dict(row)
+        # JSON 파싱
+        if rag_details.get('similar_cases'):
+            try:
+                rag_details['similar_cases'] = json.loads(rag_details['similar_cases'])
+            except (json.JSONDecodeError, TypeError):
+                rag_details['similar_cases'] = []
+        
+        return rag_details
+    
+    def get_logs_with_rag(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        min_score: float = None,
+        max_score: float = None,
+        start_date: str = None,
+        end_date: str = None
+    ) -> List[Dict]:
+        """
+        로그 조회 (RAG 정보 포함)
+        
+        Args:
+            limit: 최대 조회 개수
+            offset: 시작 위치
+            min_score: 최소 점수 필터
+            max_score: 최대 점수 필터
+            start_date: 시작 날짜 (YYYY-MM-DD)
+            end_date: 종료 날짜 (YYYY-MM-DD)
+        
+        Returns:
+            로그 리스트 (RAG 정보 포함)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT 
+                el.*,
+                erl.id as rag_log_id,
+                erl.similar_case_count,
+                erl.max_similarity,
+                erl.original_immoral_score,
+                erl.original_spam_score,
+                erl.adjusted_immoral_score,
+                erl.adjusted_spam_score,
+                erl.adjustment_weight,
+                erl.confidence_boost,
+                erl.adjustment_method,
+                erl.similar_cases,
+                erl.rag_response_time,
+                erl.vector_search_time
+            FROM ethics_logs el
+            LEFT JOIN ethics_rag_logs erl ON el.id = erl.ethics_log_id
+            WHERE 1=1
+        """
+        params = []
+        
+        if min_score is not None:
+            query += " AND el.score >= %s"
+            params.append(min_score)
+        
+        if max_score is not None:
+            query += " AND el.score <= %s"
+            params.append(max_score)
+        
+        if start_date:
+            query += " AND DATE(el.created_at) >= %s"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(el.created_at) <= %s"
+            params.append(end_date)
+        
+        query += " ORDER BY el.created_at DESC LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        logs = []
+        for row in rows:
+            log = dict(row)
+            
+            # types JSON 파싱
+            if log.get('types'):
+                try:
+                    log['types'] = json.loads(log['types'])
+                except (json.JSONDecodeError, TypeError):
+                    log['types'] = []
+            
+            # similar_cases JSON 파싱
+            if log.get('similar_cases'):
+                try:
+                    log['similar_cases'] = json.loads(log['similar_cases'])
+                except (json.JSONDecodeError, TypeError):
+                    log['similar_cases'] = None
+            
+            # RAG 정보를 별도 객체로 그룹화
+            if log.get('rag_log_id'):
+                log['rag_details'] = {
+                    'id': log.pop('rag_log_id'),
+                    'similar_case_count': log.pop('similar_case_count'),
+                    'max_similarity': log.pop('max_similarity'),
+                    'original_immoral_score': log.pop('original_immoral_score'),
+                    'original_spam_score': log.pop('original_spam_score'),
+                    'adjusted_immoral_score': log.pop('adjusted_immoral_score'),
+                    'adjusted_spam_score': log.pop('adjusted_spam_score'),
+                    'adjustment_weight': log.pop('adjustment_weight'),
+                    'confidence_boost': log.pop('confidence_boost'),
+                    'adjustment_method': log.pop('adjustment_method'),
+                    'similar_cases': log.pop('similar_cases'),
+                    'rag_response_time': log.pop('rag_response_time'),
+                    'vector_search_time': log.pop('vector_search_time')
+                }
+            else:
+                # RAG 정보가 없으면 None으로 설정
+                log['rag_details'] = None
+                # 불필요한 필드 제거
+                for key in ['rag_log_id', 'similar_case_count', 'max_similarity', 
+                           'original_immoral_score', 'original_spam_score',
+                           'adjusted_immoral_score', 'adjusted_spam_score',
+                           'adjustment_weight', 'confidence_boost', 'adjustment_method',
+                           'similar_cases', 'rag_response_time', 'vector_search_time']:
+                    log.pop(key, None)
+            
+            logs.append(log)
+        
+        conn.close()
+        return logs
 
 
 # 전역 로거 인스턴스
