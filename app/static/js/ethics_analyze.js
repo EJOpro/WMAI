@@ -39,7 +39,24 @@
     detailRuleSpam: document.getElementById('detailRuleSpam'),
     detailSpamLlmWeight: document.getElementById('detailSpamLlmWeight'),
     detailSpamRuleWeight: document.getElementById('detailSpamRuleWeight'),
-    detailFinalSpam: document.getElementById('detailFinalSpam')
+    detailFinalSpam: document.getElementById('detailFinalSpam'),
+    ragSummary: document.getElementById('ragSummary'),
+    ragSummaryText: document.getElementById('ragSummaryText'),
+    ragSummaryCases: document.getElementById('ragSummaryCases'),
+    detailRagCard: document.getElementById('ragDetailCard'),
+    detailRagEnabled: document.getElementById('detailRagEnabled'),
+    detailRagApplied: document.getElementById('detailRagApplied'),
+    detailRagWeight: document.getElementById('detailRagWeight'),
+    detailRagCount: document.getElementById('detailRagCount'),
+    detailRagMaxSim: document.getElementById('detailRagMaxSim'),
+    detailRagAdjustedScore: document.getElementById('detailRagAdjustedScore'),
+    detailRagAdjustedSpam: document.getElementById('detailRagAdjustedSpam'),
+    detailRagCases: document.getElementById('detailRagCases'),
+    ragSummaryStatus: document.getElementById('ragSummaryStatus'),
+    ragSummaryCount: document.getElementById('ragSummaryCount'),
+    ragSummaryMaxSim: document.getElementById('ragSummaryMaxSim'),
+    ragSummaryWeight: document.getElementById('ragSummaryWeight'),
+    ragSummaryAdjustedScore: document.getElementById('ragSummaryAdjustedScore')
 };
 
 // 유틸리티 함수
@@ -78,7 +95,11 @@ const utils = {
     },
     
     formatScore(score) {
-        return parseFloat(score).toFixed(1);
+        const value = parseFloat(score);
+        if (Number.isNaN(value)) {
+            return '-';
+        }
+        return value.toFixed(1);
     },
     
     getScoreClass(score) {
@@ -154,6 +175,33 @@ const utils = {
             minute: '2-digit',
             second: '2-digit'
         });
+    },
+
+    escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    formatBoolean(flag) {
+        return flag ? '예' : '아니오';
+    },
+
+    formatPercentage(value) {
+        if (isNaN(value)) return '-';
+        // 백엔드에서 이미 0-100 범위로 전달됨 (0-1 범위가 아님)
+        return `${parseFloat(value).toFixed(1)}%`;
+    },
+
+    formatWeight(value) {
+        if (value === null || value === undefined) return '-';
+        const number = Number(value);
+        if (Number.isNaN(number)) return '-';
+        return number.toFixed(2);
     }
 };
 
@@ -232,7 +280,8 @@ const analyzer = {
         elements.recommendation.innerHTML = utils.getRecommendation(score, spam, result.types);
         
         // 상세 분석 데이터 저장
-        detailedAnalysisData = result.detailed;
+        detailedAnalysisData = result.detailed || {};
+        const ragData = detailedAnalysisData.rag || null;
         console.log('[분석 결과] 상세 데이터 저장:', detailedAnalysisData);
         
         // 상세 분석 버튼 표시
@@ -247,7 +296,68 @@ const analyzer = {
         if (elements.detailSection) {
             elements.detailSection.style.display = 'none';
         }
-        
+
+        // RAG 요약 표시
+        if (elements.ragSummary) {
+            if (ragData && ragData.enabled && ragData.similar_cases_count > 0) {
+                const weightText = utils.formatWeight(ragData.adjustment_weight);
+                const appliedText = ragData.adjustment_applied
+                    ? `보정 적용 (가중치 ${weightText})`
+                    : '보정은 적용되지 않았습니다';
+                elements.ragSummaryText.innerHTML = `유사 사례 <strong>${ragData.similar_cases_count}</strong>건을 참조했습니다. ${appliedText}.`;
+
+                if (elements.ragSummaryStatus) {
+                    elements.ragSummaryStatus.textContent = ragData.adjustment_applied ? '보정 적용됨' : '보정 참고만 함';
+                    elements.ragSummaryStatus.classList.toggle('inactive', !ragData.adjustment_applied);
+                }
+
+                if (elements.ragSummaryCount) {
+                    elements.ragSummaryCount.textContent = ragData.similar_cases_count;
+                }
+
+                if (elements.ragSummaryMaxSim) {
+                    elements.ragSummaryMaxSim.textContent = utils.formatPercentage(ragData.max_similarity);
+                }
+
+                if (elements.ragSummaryWeight) {
+                    elements.ragSummaryWeight.textContent = ragData.adjustment_applied ? weightText : '-';
+                }
+
+                if (elements.ragSummaryAdjustedScore) {
+                    const adjustedScoreText = ragData.adjustment_applied && ragData.adjusted_score !== null
+                        ? utils.formatScore(ragData.adjusted_score)
+                        : '-';
+                    elements.ragSummaryAdjustedScore.textContent = adjustedScoreText;
+                }
+ 
+                if (elements.ragSummaryCases) {
+                    const summaryCases = (ragData.similar_cases || []).slice(0, 3);
+                    if (summaryCases.length) {
+                        const listHtml = summaryCases.map((item, idx) => {
+                            return `
+                                <li>
+                                    <strong>${idx + 1}.</strong>
+                                    <span class="rag-case-sentence">${utils.escapeHtml(item.sentence)}</span>
+                                    <span class="rag-case-meta">(유사도 ${utils.formatPercentage(item.similarity)} · 신뢰도 ${utils.formatScore(item.confidence)})</span>
+                                </li>
+                            `;
+                        }).join('');
+                        elements.ragSummaryCases.innerHTML = listHtml;
+                    } else {
+                        elements.ragSummaryCases.innerHTML = '<li>표시할 유사 사례가 없습니다.</li>';
+                    }
+                }
+
+                elements.ragSummary.style.display = 'block';
+            } else {
+                elements.ragSummary.style.display = 'none';
+                if (elements.ragSummaryStatus) {
+                    elements.ragSummaryStatus.textContent = 'RAG 데이터 없음';
+                    elements.ragSummaryStatus.classList.add('inactive');
+                }
+            }
+        }
+
         elements.resultSection.classList.add('show');
         utils.hideError();
         
@@ -268,7 +378,8 @@ const analyzer = {
         
         console.log('[상세분석] 데이터:', detailedAnalysisData);
         
-        const d = detailedAnalysisData;
+        const d = detailedAnalysisData || {};
+        const rag = d.rag || null;
         
         try {
             // 비윤리 점수 상세
@@ -292,6 +403,42 @@ const analyzer = {
             const finalSpam = (d.llm_spam_score * d.spam_weights.llm + d.rule_spam_score * d.spam_weights.rule).toFixed(1);
             elements.detailFinalSpam.textContent = finalSpam;
             
+            // RAG 상세 정보
+            if (elements.detailRagCard) {
+                if (rag && rag.enabled && rag.similar_cases_count !== undefined) {
+                    elements.detailRagCard.style.display = 'block';
+                    elements.detailRagEnabled.textContent = utils.formatBoolean(rag.enabled);
+                    elements.detailRagApplied.textContent = utils.formatBoolean(rag.adjustment_applied);
+                    const ragWeightValue = utils.formatWeight(rag.adjustment_weight);
+                    elements.detailRagWeight.textContent = rag.adjustment_applied ? ragWeightValue : '-';
+                    elements.detailRagCount.textContent = rag.similar_cases_count;
+                    elements.detailRagMaxSim.textContent = utils.formatPercentage(rag.max_similarity);
+                    elements.detailRagAdjustedScore.textContent = rag.adjustment_applied && rag.adjusted_score !== null ? utils.formatScore(rag.adjusted_score) : '-';
+                    elements.detailRagAdjustedSpam.textContent = rag.adjustment_applied && rag.adjusted_spam_score !== null ? utils.formatScore(rag.adjusted_spam_score) : '-';
+
+                    if (elements.detailRagCases) {
+                        const cases = rag.similar_cases || [];
+                        if (cases.length) {
+                            const caseListHtml = cases.map((item, idx) => `
+                                <div class="rag-case-item">
+                                    <div class="rag-case-title">사례 ${idx + 1}</div>
+                                    <div class="rag-case-sentence">${utils.escapeHtml(item.sentence)}</div>
+                                    <div class="rag-case-meta">
+                                        유사도 ${utils.formatPercentage(item.similarity)} · 비윤리 ${utils.formatScore(item.immoral_score)} · 스팸 ${utils.formatScore(item.spam_score)} · 신뢰도 ${utils.formatScore(item.confidence)}
+                                        ${item.confirmed ? ' · 관리자 확인' : ''}
+                                    </div>
+                                </div>
+                            `).join('');
+                            elements.detailRagCases.innerHTML = caseListHtml;
+                        } else {
+                            elements.detailRagCases.innerHTML = '<p>참조된 유사 사례가 없습니다.</p>';
+                        }
+                    }
+                } else {
+                    elements.detailRagCard.style.display = 'none';
+                }
+            }
+
             // 상세 섹션 표시
             elements.detailSection.style.display = 'block';
             
@@ -353,6 +500,9 @@ const app = {
         }
         if (!elements.detailSection) {
             console.error('[초기화] 경고: detailSection 요소를 찾을 수 없습니다');
+        }
+        if (!elements.detailRagCard) {
+            console.warn('[초기화] RAG 상세 카드 요소를 찾을 수 없습니다');
         }
         
         eventListeners.init();

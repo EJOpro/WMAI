@@ -18,6 +18,13 @@ class ReportProcessRequest(BaseModel):
     note: Optional[str] = None
 
 
+class EthicsFeedbackRequest(BaseModel):
+    """Ethics 피드백 요청"""
+    log_id: int
+    action: str  # 'immoral', 'spam', 'clean'
+    note: Optional[str] = None
+
+
 @router.get("/admin/me")
 async def check_admin(request: Request):
     """현재 사용자의 관리자 여부 확인"""
@@ -120,11 +127,14 @@ async def process_report(request: Request, report_id: int, data: ReportProcessRe
     """신고 처리 (관리자 전용)"""
     admin_user = require_admin(request)
     
-    # 신고 조회
+    # 신고 조회 (신고 사유와 내용 포함)
     report = execute_query("""
-        SELECT id, report_type, board_id, comment_id, status
-        FROM report
-        WHERE id = %s
+        SELECT r.id, r.report_type, r.board_id, r.comment_id, r.status, r.report_reason,
+               b.content as board_content, c.content as comment_content
+        FROM report r
+        LEFT JOIN board b ON r.board_id = b.id
+        LEFT JOIN comment c ON r.comment_id = c.id
+        WHERE r.id = %s
     """, (report_id,), fetch_one=True)
     
     if not report:
@@ -177,6 +187,69 @@ async def process_report(request: Request, report_id: int, data: ReportProcessRe
             assigned_to = %s
         WHERE id = %s
     """, (new_status, post_action, data.note, admin_user['user_id'], report_id))
+    
+    # 관리자 확정 사례에 추가
+    try:
+        report_reason = report.get('report_reason', '')
+        content = report.get('board_content') or report.get('comment_content', '')
+        
+        # 신고 사유와 처리 액션에 따른 확정 타입 결정
+        admin_action = None
+        
+        if report_reason == '욕설 및 비방':
+            if data.action == 'approve':
+                admin_action = 'immoral'  # 비윤리 확정
+            elif data.action == 'reject':
+                admin_action = 'clean'  # 문제없음 확정
+        
+        elif report_reason == '도배 및 광고':
+            if data.action == 'approve':
+                admin_action = 'spam'  # 스팸 확정
+            elif data.action == 'reject':
+                admin_action = 'clean'  # 문제없음 확정
+        
+        # 확정 사례 저장 (내용이 10자 이상이고 admin_action이 결정된 경우만)
+        if admin_action and content and len(content.strip()) >= 10:
+            from ethics.ethics_feedback import save_feedback_to_vector_db
+            from ethics.ethics_db_logger import DatabaseLogger
+            
+            # 해당 콘텐츠의 ethics_logs 조회 (최근 로그)
+            db_logger = DatabaseLogger()
+            logs = db_logger.get_logs(limit=1, offset=0)
+            
+            # 기본 점수 설정 (로그가 없는 경우)
+            original_immoral_score = 50.0
+            original_spam_score = 50.0
+            original_immoral_confidence = 50.0
+            original_spam_confidence = 50.0
+            
+            # 콘텐츠와 일치하는 로그 찾기
+            for log in logs:
+                if log.get('text') == content:
+                    original_immoral_score = float(log.get('score', 50.0))
+                    original_spam_score = float(log.get('spam', 50.0))
+                    original_immoral_confidence = float(log.get('confidence', 50.0))
+                    original_spam_confidence = float(log.get('spam_confidence', 50.0))
+                    break
+            
+            # VectorDB에 저장
+            save_feedback_to_vector_db(
+                text=content,
+                original_immoral_score=original_immoral_score,
+                original_spam_score=original_spam_score,
+                original_immoral_confidence=original_immoral_confidence,
+                original_spam_confidence=original_spam_confidence,
+                admin_action=admin_action,
+                admin_id=admin_user['user_id'],
+                log_id=report_id,
+                note=f"신고처리: {report_reason} - {data.action}"
+            )
+            
+            print(f"[INFO] 신고 처리 후 관리자 확정 사례 저장: report_id={report_id}, action={admin_action}")
+    
+    except Exception as e:
+        # 확정 사례 저장 실패해도 신고 처리는 계속 진행
+        print(f"[WARN] 관리자 확정 사례 저장 실패: {e}")
     
     return {
         'success': True,
@@ -347,4 +420,305 @@ async def get_report_analysis(request: Request, report_id: int):
             'created_at': analysis['created_at'].isoformat() if analysis['created_at'] else None
         }
     }
+
+
+@router.post("/admin/ethics/feedback")
+async def save_ethics_feedback(request: Request, feedback_data: EthicsFeedbackRequest):
+    """
+    관리자가 비윤리/스팸 분석 결과에 대한 피드백 저장 (벡터DB에만)
+    
+    Args:
+        feedback_data: 피드백 데이터
+            - log_id: ethics_logs 테이블의 ID
+            - action: 'immoral', 'spam', 'clean'
+            - note: 관리자 메모
+    
+    Returns:
+        저장 결과
+    """
+    admin_user = require_admin(request)
+    
+    # 기존 분석 로그 조회
+    log = execute_query("""
+        SELECT id, text, score, spam, confidence, spam_confidence
+        FROM ethics_logs
+        WHERE id = %s
+    """, (feedback_data.log_id,), fetch_one=True)
+    
+    if not log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="분석 로그를 찾을 수 없습니다"
+        )
+    
+    # 액션 검증
+    if feedback_data.action not in ['immoral', 'spam', 'clean']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="올바른 액션을 선택하세요 (immoral/spam/clean)"
+        )
+    
+    # 벡터DB에 피드백 저장
+    try:
+        from ethics.ethics_feedback import save_feedback_to_vector_db
+        
+        save_feedback_to_vector_db(
+            text=log['text'],
+            original_immoral_score=log['score'],
+            original_spam_score=log['spam'],
+            original_immoral_confidence=log['confidence'],
+            original_spam_confidence=log['spam_confidence'],
+            admin_action=feedback_data.action,
+            admin_id=admin_user['user_id'],
+            log_id=feedback_data.log_id,
+            note=feedback_data.note
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"피드백 저장 실패: {str(e)}"
+        )
+    
+    # ethics_logs 테이블 업데이트 (관리자 확정 정보 저장)
+    try:
+        from datetime import datetime
+        execute_query("""
+            UPDATE ethics_logs
+            SET admin_confirmed = 1,
+                confirmed_type = %s,
+                confirmed_at = %s,
+                confirmed_by = %s
+            WHERE id = %s
+        """, (feedback_data.action, datetime.now(), admin_user['user_id'], feedback_data.log_id))
+    except Exception as e:
+        print(f"[WARN] ethics_logs 업데이트 실패: {e}")
+        # 로그 업데이트 실패해도 피드백은 이미 저장되었으므로 계속 진행
+    
+    return {
+        'success': True,
+        'message': '피드백이 저장되었습니다',
+        'action': feedback_data.action
+    }
+
+
+@router.delete("/admin/ethics/feedback/{case_id}")
+async def delete_ethics_feedback_case(request: Request, case_id: str):
+    """관리자 확정 사례 삭제"""
+    require_admin(request)
+    
+    try:
+        from ethics.ethics_vector_db import get_client, delete_case
+        client = get_client()
+        result = delete_case(client=client, chunk_id=case_id)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="확정 사례를 찾을 수 없습니다."
+            )
+        
+        return {
+            'success': True,
+            'deleted_id': case_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"삭제 중 오류: {str(e)}"
+        )
+
+
+@router.get("/admin/ethics/all-cases")
+async def list_all_vector_cases(
+    request: Request,
+    limit: int = 20,
+    offset: int = 0
+):
+    """벡터DB 전체 사례 목록 조회"""
+    require_admin(request)
+
+    if limit < 1:
+        limit = 1
+    limit = min(limit, 100)
+    offset = max(offset, 0)
+
+    try:
+        from ethics.ethics_vector_db import get_client, get_all_cases
+        client = get_client()
+        cases = get_all_cases(
+            client=client,
+            limit=limit,
+            offset=offset
+        )
+
+        from datetime import datetime
+
+        case_list = []
+        for case in cases:
+            metadata = case.get('metadata', {}) or {}
+            created_at_raw = metadata.get('created_at')
+            
+            immoral_score = float(metadata.get('immoral_score', 0.0) or 0.0)
+            spam_score = float(metadata.get('spam_score', 0.0) or 0.0)
+            immoral_confidence = float(metadata.get('immoral_confidence', metadata.get('confidence', 0.0)) or 0.0)
+            spam_confidence = float(metadata.get('spam_confidence', 0.0) or 0.0)
+            confirmed = metadata.get('confirmed', False)
+
+            created_at_iso = None
+            if created_at_raw:
+                try:
+                    normalized = created_at_raw
+                    if len(normalized) == 19 and 'T' not in normalized:
+                        normalized = normalized.replace(' ', 'T')
+                    if not (normalized.endswith('Z') or ('+' in normalized and len(normalized.split('+')[-1]) in [4,5])):
+                        normalized += '+00:00'
+                    created_at_iso = datetime.fromisoformat(normalized).isoformat()
+                except ValueError:
+                    pass
+
+            case_list.append({
+                'id': case.get('id'),
+                'text': case.get('document') or metadata.get('sentence', ''),
+                'created_at': created_at_iso,
+                'immoral_score': immoral_score,
+                'spam_score': spam_score,
+                'immoral_confidence': immoral_confidence,
+                'spam_confidence': spam_confidence,
+                'confirmed': confirmed,
+                'post_id': metadata.get('post_id'),
+                'user_id': metadata.get('user_id'),
+                'feedback_type': metadata.get('feedback_type'),
+                'admin_action': metadata.get('admin_action'),
+                'metadata': metadata
+            })
+
+        return {
+            'success': True,
+            'cases': case_list,
+            'count': len(case_list),
+            'limit': limit,
+            'offset': offset
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"사례 조회 실패: {str(e)}"
+        )
+
+
+@router.get("/admin/ethics/feedback")
+async def list_ethics_feedback(
+    request: Request,
+    limit: int = 20,
+    offset: int = 0,
+    source_type: Optional[str] = None,
+    action: Optional[str] = None
+):
+    """관리자 확정 사례 목록 조회 (벡터DB에서)"""
+    require_admin(request)
+
+    if limit < 1:
+        limit = 1
+    limit = min(limit, 100)
+    offset = max(offset, 0)
+
+    try:
+        from ethics.ethics_vector_db import get_client, get_recent_confirmed_cases
+        client = get_client()
+        cases = get_recent_confirmed_cases(
+            client=client,
+            limit=limit,
+            offset=offset,
+            action=action,
+            source_type=source_type
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"확정 사례 조회 실패: {str(e)}"
+        )
+
+    feedback_list = []
+    for case in cases:
+        metadata = case.get('metadata', {}) or {}
+        created_at_raw = metadata.get('created_at')
+        source = metadata.get('source_type', 'ethics_log')
+        admin_action = metadata.get('admin_action')
+
+        created_at_iso = None
+        if created_at_raw:
+            try:
+                normalized = created_at_raw.replace('Z', '+00:00')
+                created_at_iso = datetime.fromisoformat(normalized).isoformat()
+            except Exception:
+                created_at_iso = created_at_raw
+
+        feedback_list.append({
+            'id': case.get('id'),
+            'text': case.get('document') or metadata.get('sentence', ''),
+            'created_at': created_at_iso,
+            'admin_action': admin_action,
+            'confidence': metadata.get('confidence'),
+            'immoral_score': metadata.get('immoral_score'),
+            'spam_score': metadata.get('spam_score'),
+            'note': metadata.get('note'),
+            'admin_id': metadata.get('admin_id'),
+            'feedback_type': metadata.get('feedback_type'),
+            'source_type': source,
+            'source_id': metadata.get('source_id') or metadata.get('report_id'),
+            'metadata': metadata
+        })
+
+    return {
+        'success': True,
+        'feedbacks': feedback_list,
+        'count': len(feedback_list),
+        'limit': limit,
+        'offset': offset
+    }
+
+ 
+@router.get("/admin/ethics/feedback/stats")
+async def get_ethics_feedback_stats(request: Request):
+    """
+    피드백 통계 조회 (관리자 전용)
+    
+    Returns:
+        피드백 통계 정보
+    """
+    require_admin(request)
+    
+    try:
+        # 액션별 통계
+        action_stats = execute_query("""
+            SELECT 
+                action,
+                COUNT(*) as count,
+                AVG(original_score - COALESCE(adjusted_score, original_score)) as avg_score_diff
+            FROM ethics_feedback
+            GROUP BY action
+        """, fetch_all=True)
+        
+        # 전체 통계
+        total_stats = execute_query("""
+            SELECT 
+                COUNT(*) as total_count,
+                COUNT(DISTINCT log_id) as unique_logs,
+                COUNT(DISTINCT admin_id) as admin_count,
+                AVG(original_score - COALESCE(adjusted_score, original_score)) as overall_avg_diff
+            FROM ethics_feedback
+        """, fetch_one=True)
+        
+        return {
+            'success': True,
+            'action_stats': action_stats,
+            'total_stats': total_stats
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"통계 조회 실패: {str(e)}"
+        )
 
