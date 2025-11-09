@@ -594,8 +594,7 @@ const dataLoader = {
         const ragId = `rag-details-${Date.now()}`;
         
         return `
-            <div class="detail-divider"></div>
-            <div id="rag-details-section" style="background: #eee; padding: 15px; border-radius: 8px; margin: 10px 0; display: none;">
+            <div id="rag-details-section" style="background: #eee; padding: 15px; border-radius: 8px; margin: 15px 0; display: none;">
                 <h4 style="margin-top: 0; color: #495057; border-bottom: 2px solid #007bff; padding-bottom: 10px;">
                     <span><i class="fas fa-brain"></i> RAG 보정 상세 정보${autoBlockBadge}</span>
                 </h4>
@@ -658,6 +657,7 @@ const dataLoader = {
                 ` : ''}
                 </div>
             </div>
+            <div class="detail-divider"></div>
         `;
     },
     
