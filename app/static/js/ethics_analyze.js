@@ -95,6 +95,9 @@ const utils = {
     },
     
     formatScore(score) {
+        if (score === null || score === undefined) {
+            return '-';
+        }
         const value = parseFloat(score);
         if (Number.isNaN(value)) {
             return '-';
@@ -265,19 +268,41 @@ const analyzer = {
     displayResult(result) {
         elements.analysisTime.textContent = utils.formatTime();
         
-        const score = parseFloat(result.score);
-        const confidence = parseFloat(result.confidence);
-        const spam = parseFloat(result.spam);
-        const spamConfidence = parseFloat(result.spam_confidence || result.confidence);
+        // 즉시 차단 케이스 처리
+        const isAutoBlocked = result.auto_blocked || false;
         
-        elements.scoreValue.innerHTML = `${utils.formatScore(score)} <small>(${utils.formatScore(confidence)})</small>`;
-        elements.spamValue.innerHTML = `${utils.formatScore(spam)} <small>(${utils.formatScore(spamConfidence)})</small>`;
-        
-        elements.scoreCard.className = `score-card ${utils.getScoreClass(score)}`;
-        elements.spamCard.className = `score-card ${utils.getSpamClass(spam)}`;
-        
-        elements.typesContainer.innerHTML = utils.createTypeTags(result.types);
-        elements.recommendation.innerHTML = utils.getRecommendation(score, spam, result.types);
+        if (isAutoBlocked) {
+            // 즉시 차단 케이스: 점수가 null이므로 특별한 표시
+            elements.scoreValue.innerHTML = `<span style="color: #e74c3c;font-size:1.7rem;font-weight: bold;">즉시 차단</span> <br>
+            <small style="font-size:1.5rem;">(LLM 분석 건너뛰기)</small>`;
+            elements.spamValue.innerHTML = `<span style="color: #e74c3c;font-size:1.7rem;font-weight: bold;">즉시 차단</span> <br>
+            <small style="font-size:1.5rem;">(LLM 분석 건너뛰기)</small>`;
+            
+            elements.scoreCard.className = 'score-card high-risk';
+            elements.spamCard.className = 'score-card spam-high';
+            
+            elements.typesContainer.innerHTML = utils.createTypeTags(result.types);
+            elements.recommendation.innerHTML = `
+                <h4><i class="fas fa-bolt"></i> 즉시 차단 (관리자 확정 사례 유사)</h4>
+                <p>이 텍스트는 관리자가 확정한 비윤리/스팸 사례와 매우 유사하여 LLM 분석 없이 즉시 차단되었습니다. 
+                유사도 90% 이상, 점수 90 이상, 신뢰도 80% 이상인 확정 사례와 일치합니다.</p>
+            `;
+        } else {
+            // 일반 케이스
+            const score = parseFloat(result.score);
+            const confidence = parseFloat(result.confidence);
+            const spam = parseFloat(result.spam);
+            const spamConfidence = parseFloat(result.spam_confidence || result.confidence);
+            
+            elements.scoreValue.innerHTML = `${utils.formatScore(score)} <small>(${utils.formatScore(confidence)})</small>`;
+            elements.spamValue.innerHTML = `${utils.formatScore(spam)} <small>(${utils.formatScore(spamConfidence)})</small>`;
+            
+            elements.scoreCard.className = `score-card ${utils.getScoreClass(score)}`;
+            elements.spamCard.className = `score-card ${utils.getSpamClass(spam)}`;
+            
+            elements.typesContainer.innerHTML = utils.createTypeTags(result.types);
+            elements.recommendation.innerHTML = utils.getRecommendation(score, spam, result.types);
+        }
         
         // 상세 분석 데이터 저장
         detailedAnalysisData = result.detailed || {};
@@ -382,26 +407,37 @@ const analyzer = {
         const rag = d.rag || null;
         
         try {
-            // 비윤리 점수 상세
-            elements.detailBertScore.textContent = d.bert_score;
-            elements.detailBertConf.textContent = d.bert_confidence;
-            elements.detailLlmScore.textContent = d.llm_score;
-            elements.detailLlmConf.textContent = d.llm_confidence;
-            elements.detailProfanityBoost.textContent = d.profanity_boost;
-            elements.detailBertWeight.textContent = d.weights.bert;
-            elements.detailLlmWeight.textContent = d.weights.llm;
-            elements.detailBaseScore.textContent = d.base_score;
-            elements.detailProfanityBoost2.textContent = d.profanity_boost;
-            elements.detailFinalScore.textContent = (d.base_score + d.profanity_boost).toFixed(1);
+            // 비윤리 점수 상세 (즉시 차단 시 일부 값은 null)
+            elements.detailBertScore.textContent = utils.formatScore(d.bert_score);
+            elements.detailBertConf.textContent = utils.formatScore(d.bert_confidence);
+            elements.detailLlmScore.textContent = d.llm_score !== null ? utils.formatScore(d.llm_score) : '건너뛰기';
+            elements.detailLlmConf.textContent = d.llm_confidence !== null ? utils.formatScore(d.llm_confidence) : '건너뛰기';
+            elements.detailProfanityBoost.textContent = utils.formatScore(d.profanity_boost);
+            elements.detailBertWeight.textContent = d.weights && d.weights.bert !== undefined ? d.weights.bert.toFixed(2) : '-';
+            elements.detailLlmWeight.textContent = d.weights && d.weights.llm !== undefined ? d.weights.llm.toFixed(2) : '-';
+            elements.detailBaseScore.textContent = utils.formatScore(d.base_score);
+            elements.detailProfanityBoost2.textContent = utils.formatScore(d.profanity_boost);
             
-            // 스팸 점수 상세
-            elements.detailLlmSpam.textContent = d.llm_spam_score;
-            elements.detailRuleSpam.textContent = d.rule_spam_score;
-            elements.detailSpamLlmWeight.textContent = d.spam_weights.llm;
-            elements.detailSpamRuleWeight.textContent = d.spam_weights.rule;
+            // 최종 점수 계산 (즉시 차단 시 null)
+            if (d.base_score !== null && d.profanity_boost !== null) {
+                elements.detailFinalScore.textContent = (d.base_score + d.profanity_boost).toFixed(1);
+            } else {
+                elements.detailFinalScore.textContent = '즉시 차단';
+            }
             
-            const finalSpam = (d.llm_spam_score * d.spam_weights.llm + d.rule_spam_score * d.spam_weights.rule).toFixed(1);
-            elements.detailFinalSpam.textContent = finalSpam;
+            // 스팸 점수 상세 (즉시 차단 시 일부 값은 null)
+            elements.detailLlmSpam.textContent = d.llm_spam_score !== null ? utils.formatScore(d.llm_spam_score) : '건너뛰기';
+            elements.detailRuleSpam.textContent = utils.formatScore(d.rule_spam_score);
+            elements.detailSpamLlmWeight.textContent = d.spam_weights && d.spam_weights.llm !== undefined ? d.spam_weights.llm.toFixed(2) : '-';
+            elements.detailSpamRuleWeight.textContent = d.spam_weights && d.spam_weights.rule !== undefined ? d.spam_weights.rule.toFixed(2) : '-';
+            
+            // 최종 스팸 점수 계산 (즉시 차단 시 null)
+            if (d.llm_spam_score !== null && d.rule_spam_score !== null && d.spam_weights) {
+                const finalSpam = (d.llm_spam_score * d.spam_weights.llm + d.rule_spam_score * d.spam_weights.rule).toFixed(1);
+                elements.detailFinalSpam.textContent = finalSpam;
+            } else {
+                elements.detailFinalSpam.textContent = '즉시 차단';
+            }
             
             // RAG 상세 정보
             if (elements.detailRagCard) {
