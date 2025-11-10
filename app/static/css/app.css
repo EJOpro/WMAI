@@ -110,7 +110,7 @@ body {
 /* 히어로 섹션 */
 .hero-section {
     text-align: center;
-    padding: 3rem 0;
+    padding: 1rem 0 0;
 }
 
 .hero-section h1 {
