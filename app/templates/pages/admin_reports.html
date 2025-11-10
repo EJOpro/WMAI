@@ -343,10 +343,12 @@
             font-size: 20px;
             font-weight: 600;
             margin-bottom: 20px;
+            padding:0;
         }
         
         .modal-body {
             margin-bottom: 20px;
+            padding:0;
         }
         
         .modal-body textarea {
@@ -665,8 +667,9 @@
         }
         
         // 신고 목록 로드
-        async function loadReports(page = 1) {
-            const status = document.getElementById('statusFilter').value;
+        async function loadReports(page = 1, autoRetry = true) {
+            const statusFilter = document.getElementById('statusFilter');
+            const status = statusFilter.value;
             const type = document.getElementById('typeFilter').value;
             
             const params = new URLSearchParams({
@@ -682,6 +685,14 @@
                 const data = await response.json();
                 
                 if (data.success) {
+                    // "대기중" 필터에서 결과가 없고, 자동 재시도가 활성화된 경우
+                    if (status === 'pending' && (!data.reports || data.reports.length === 0) && autoRetry) {
+                        console.log('대기중 신고가 없습니다. 모든 상태로 전환합니다.');
+                        statusFilter.value = '';  // 모든 상태로 변경
+                        await loadReports(1, false);  // 재귀 방지를 위해 autoRetry=false
+                        return;
+                    }
+                    
                     currentPage = page;
                     renderReports(data.reports);
                     renderPagination(data.pagination);

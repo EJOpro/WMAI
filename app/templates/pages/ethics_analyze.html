@@ -80,6 +80,33 @@
         <div id="recommendation" class="recommendation">
             <!-- 추천 사항이 여기에 동적으로 추가됩니다 -->
         </div>
+
+        <div id="ragSummary" class="rag-summary" style="display:none;">
+            <div class="rag-summary-header">
+                <h4><i class="fas fa-link"></i> RAG 기반 보정</h4>
+                <span id="ragSummaryStatus" class="rag-status-chip">데이터 준비 중</span>
+            </div>
+            <div class="rag-summary-metrics">
+                <div class="rag-summary-metric">
+                    <span class="metric-label">유사 사례</span>
+                    <span class="metric-value" id="ragSummaryCount">-</span>
+                </div>
+                <div class="rag-summary-metric">
+                    <span class="metric-label">최대 유사도</span>
+                    <span class="metric-value" id="ragSummaryMaxSim">-</span>
+                </div>
+                <div class="rag-summary-metric">
+                    <span class="metric-label">보정 가중치</span>
+                    <span class="metric-value" id="ragSummaryWeight">-</span>
+                </div>
+                <div class="rag-summary-metric">
+                    <span class="metric-label">보정 점수</span>
+                    <span class="metric-value" id="ragSummaryAdjustedScore">-</span>
+                </div>
+            </div>
+            <p id="ragSummaryText" class="rag-summary-text"></p>
+            <ul id="ragSummaryCases" class="rag-summary-cases"></ul>
+        </div>
         
         <!-- 상세 분석 섹션 -->
         <div id="detailSection" class="detail-analysis-section" style="display:none;">
@@ -92,11 +119,11 @@
                 <div class="detail-card">
                     <h5>비윤리 점수 계산</h5>
                     <div class="detail-row">
-                        <span>BERT 모델 점수 (신뢰도):</span>
+                        <span>BERT 모델 점수 <br>(신뢰도):</span>
                         <span><span id="detailBertScore">-</span> <small class="confidence-text">(<span id="detailBertConf">-</span>)</small></span>
                     </div>
                     <div class="detail-row">
-                        <span>LLM 모델 점수 (신뢰도):</span>
+                        <span>LLM 모델 점수 <br>(신뢰도):</span>
                         <span><span id="detailLlmScore">-</span> <small class="confidence-text">(<span id="detailLlmConf">-</span>)</small></span>
                     </div>
                     <div class="detail-row">
@@ -127,6 +154,42 @@
                     </div>
                     <div class="detail-result">
                         = <span id="detailFinalSpam">-</span>
+                    </div>
+                </div>
+
+                <!-- RAG 상세 -->
+                <div class="detail-card" id="ragDetailCard" style="display:none;">
+                    <h5>RAG 기반 보정</h5>
+                    <div class="detail-row">
+                        <span>RAG 활성화:</span>
+                        <span id="detailRagEnabled">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>보정 적용 여부:</span>
+                        <span id="detailRagApplied">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>보정 가중치:</span>
+                        <span id="detailRagWeight">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>유사 사례 개수:</span>
+                        <span id="detailRagCount">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>최대 유사도:</span>
+                        <span id="detailRagMaxSim">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>보정된 비윤리 점수:</span>
+                        <span id="detailRagAdjustedScore">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>보정된 스팸 점수:</span>
+                        <span id="detailRagAdjustedSpam">-</span>
+                    </div>
+                    <div class="rag-detail-cases" id="detailRagCases">
+                        <!-- 유사 사례 목록 -->
                     </div>
                 </div>
             </div>

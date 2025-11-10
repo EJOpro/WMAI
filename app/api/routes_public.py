@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from app.auth import is_admin
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -55,7 +56,19 @@ async def ethics_analyze(request: Request):
 
 @router.get("/ethics_dashboard", response_class=HTMLResponse)
 async def ethics_dashboard(request: Request):
-    """로그기록 대시보드"""
+    """로그기록 대시보드 (관리자 전용)"""
+    # 관리자 권한 체크
+    if not is_admin(request):
+        # 관리자가 아닌 경우 권한 없음 페이지로 이동
+        return templates.TemplateResponse(
+            "pages/ethics_dashboard.html",
+            {
+                "request": request, 
+                "title": "로그기록 대시보드",
+                "unauthorized": True  # 권한 없음 플래그
+            }
+        )
+    
     return templates.TemplateResponse(
         "pages/ethics_dashboard.html",
         {"request": request, "title": "로그기록 대시보드"}
