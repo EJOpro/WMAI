@@ -40,7 +40,7 @@ def start_servers():
     
     try:
         # 1. 메인 서버 시작 (8000번 포트)
-        print("🚀 메인 서버 시작 중... (포트 8000)")
+        print("[INFO] 메인 서버 시작 중... (포트 8000)")
         main_server = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "app.main:app", 
              "--host", "0.0.0.0", "--port", "8000", "--reload"],
@@ -54,7 +54,7 @@ def start_servers():
         time.sleep(2)  # 서버 시작 대기
         
         # 2. 트렌드 서버 시작 (8001번 포트)
-        print("🚀 트렌드 서버 시작 중... (포트 8001)")
+        print("[INFO] 트렌드 서버 시작 중... (포트 8001)")
         trend_dir = Path(__file__).parent / "trend"
         trend_server = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "backend.main:app", 
@@ -68,10 +68,10 @@ def start_servers():
         processes.append(trend_server)
         time.sleep(2)  # 서버 시작 대기
         
-        print("\n✅ 두 서버가 모두 시작되었습니다!")
+        print("\n[SUCCESS] 두 서버가 모두 시작되었습니다!")
         print("   메인 서버: http://localhost:8000")
         print("   트렌드 서버: http://localhost:8001")
-        print("\n📊 트렌드 대시보드를 사용하려면:")
+        print("\n[INFO] 트렌드 대시보드를 사용하려면:")
         print("   http://localhost:8000/trends 접속\n")
         
         # 서버 로그 출력 (비동기)
@@ -103,11 +103,11 @@ def start_servers():
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-        print("✅ 모든 서버가 종료되었습니다. 안녕히 가세요!")
+        print("[SUCCESS] 모든 서버가 종료되었습니다. 안녕히 가세요!")
     
     except Exception as e:
-        print(f"\n\n❌ 서버 실행 중 오류 발생: {e}")
-        print("\n🔍 문제 해결 방법:")
+        print(f"\n\n[ERROR] 서버 실행 중 오류 발생: {e}")
+        print("\n[DEBUG] 문제 해결 방법:")
         print("  1. requirements.txt 설치 확인:")
         print("     pip install -r requirements.txt")
         print("     pip install -r trend/requirements.txt")

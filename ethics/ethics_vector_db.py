@@ -24,14 +24,25 @@ def get_client() -> chromadb.ClientAPI:
     Returns:
         chromadb.ClientAPI: ChromaDB 클라이언트 인스턴스
     """
-    client = chromadb.PersistentClient(
-        path=PERSIST_DIR,
-        settings=Settings(
-            anonymized_telemetry=False,
-            allow_reset=True
+    try:
+        # 디렉토리가 없으면 생성
+        import os
+        if not os.path.exists(PERSIST_DIR):
+            os.makedirs(PERSIST_DIR, exist_ok=True)
+            print(f"[INFO] ChromaDB 디렉토리 생성: {PERSIST_DIR}")
+        
+        client = chromadb.PersistentClient(
+            path=PERSIST_DIR,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
         )
-    )
-    return client
+        return client
+        
+    except Exception as e:
+        print(f"[ERROR] ChromaDB 클라이언트 생성 실패: {type(e).__name__}: {e}")
+        raise
 
 
 def get_collection(client: chromadb.ClientAPI, name: str = COLLECTION_NAME) -> chromadb.Collection:
@@ -248,6 +259,10 @@ def get_collection_stats(
         Dict: 컬렉션 통계 정보
     """
     try:
+        # 클라이언트 상태 확인
+        if client is None:
+            raise ValueError("ChromaDB 클라이언트가 None입니다")
+        
         collection = get_collection(client, collection_name)
         count = collection.count()
         
@@ -294,11 +309,14 @@ def get_collection_stats(
         return stats
         
     except Exception as e:
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"[ERROR] ChromaDB 통계 조회 실패: {error_msg}")
+        
         return {
             "collection_name": collection_name,
             "total_documents": 0,
             "status": "error",
-            "error": str(e)
+            "error": error_msg
         }
 
 
