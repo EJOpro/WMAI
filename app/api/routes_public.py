@@ -118,6 +118,14 @@ async def board_list(request: Request):
         {"request": request, "title": "게시판"}
     )
 
+@router.get("/board/search", response_class=HTMLResponse)
+async def board_search(request: Request):
+    """검색 결과 게시판 페이지"""
+    return templates.TemplateResponse(
+        "pages/board_search.html",
+        {"request": request, "title": "검색 결과 게시판"}
+    )
+
 @router.get("/board/write", response_class=HTMLResponse)
 async def board_write(request: Request):
     """게시글 작성 페이지"""
@@ -140,5 +148,13 @@ async def admin_reports_page(request: Request):
     return templates.TemplateResponse(
         "pages/admin_reports.html",
         {"request": request, "title": "관리자 - 신고 관리"}
+    )
+
+@router.get("/chatbot", response_class=HTMLResponse)
+async def chatbot_page(request: Request):
+    """AI 챗봇 페이지"""
+    return templates.TemplateResponse(
+        "pages/chatbot.html",
+        {"request": request, "title": "AI 챗봇"}
     )
 

@@ -1,0 +1,1940 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 채팅 - Community Admin</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background-color: #FFFFFF;
+            color: #1F2937;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 네비게이션 바 숨기기 */
+        .navbar {
+            display: none;
+        }
+
+        /* 메인 컨테이너 - 초기에는 단일 패널 */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            transition: all 0.3s ease;
+        }
+
+        /* Split View로 전환 시 */
+        .main-container.split-view {
+            display: grid !important;
+            grid-template-columns: 70% 4px calc(30% - 4px);
+        }
+        
+        .main-container.split-view .chat-panel {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 왼쪽 패널 (도구 페이지) */
+        .left-panel {
+            display: none;
+            background-color: white;
+            border-right: 1px solid #E5E7EB;
+            overflow: hidden;
+        }
+
+        .main-container.split-view .left-panel.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .left-panel iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            flex: 1;
+        }
+        
+        /* 왼쪽 패널에 분석 결과가 함께 표시될 때 */
+        .left-panel.with-analysis iframe {
+            height: 50%;
+            flex: none;
+        }
+        
+        .left-panel .analysis-summary {
+            height: 50%;
+            overflow-y: auto;
+            border-top: 2px solid #E5E7EB;
+            background: #F9FAFB;
+        }
+
+        /* Execution Panel 제거됨 - 검색 결과는 왼쪽 board_search.html에만 표시 */
+
+        /* 채팅 패널 */
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #FFFFFF;
+            max-width: 100%;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        
+        /* Split view일 때 채팅 패널 */
+        .main-container.split-view .chat-panel {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        /* 채팅 헤더 - 더 미니멀하게 */
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1.5rem;
+            border-bottom: 1px solid #F0F0F0;
+            background: #FFFFFF;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            flex-shrink: 0;
+        }
+        
+        /* Split view일 때 헤더 */
+        .main-container.split-view .chat-header {
+            padding: 0.75rem 1rem;
+        }
+
+        .chat-header-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1F2937;
+            margin: 0;
+        }
+
+        .chat-header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            border: none;
+            background: transparent;
+            color: #6B7280;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: #F9FAFB;
+            color: #374151;
+        }
+
+        .btn-secondary {
+            background: transparent;
+        }
+
+        /* 채팅 메시지 영역 */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            background: #FFFFFF;
+            width: 900px;
+            max-width: 900px;
+            margin: 0 auto;
+            min-height: 0;
+        }
+        
+        /* Split view일 때는 flex로 변경 */
+        .main-container.split-view .chat-messages {
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+        
+        .chat-messages .message {
+            margin-bottom: 1.5rem;
+        }
+        
+        .chat-messages .message:last-child {
+            margin-bottom: 0;
+        }
+
+        .chat-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #9CA3AF;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .chat-empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.4;
+        }
+
+        .chat-empty-text {
+            font-size: 0.9375rem;
+            line-height: 1.6;
+            color: #6B7280;
+        }
+
+        /* 메시지 스타일 */
+        .message {
+            display: flex;
+            animation: fadeIn 0.3s ease-in;
+            max-width: 100%;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.bot {
+            justify-content: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 700px;
+            padding: 14px 18px;
+            border-radius: 1.25rem;
+            line-height: 1.6;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        
+        /* Split view일 때 메시지 버블 */
+        .main-container.split-view .message-bubble {
+            max-width: 90%;
+        }
+
+        .message.user .message-bubble {
+            background: #2563EB;
+            color: white;
+            border-bottom-right-radius: 0.25rem;
+            margin-left: auto;
+        }
+
+        .message.bot .message-bubble {
+            background: #F7F7F8;
+            color: #1F2937;
+            border-bottom-left-radius: 0.25rem;
+            border: 1px solid #E5E7EB;
+        }
+
+        .message-content {
+            font-size: 0.9375rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.75;
+        }
+
+        .message.user .message-content {
+            color: #FFFFFF;
+        }
+
+        .message.bot .message-content {
+            color: #1F2937;
+        }
+
+        .tool-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 0.5rem;
+            font-size: 0.75rem;
+            color: #1E40AF;
+            margin-top: 10px;
+            font-weight: 500;
+        }
+
+        .page-action-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #2563EB;
+            color: white;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .page-action-btn:hover {
+            background: #1D4ED8;
+        }
+
+        /* 입력 영역 */
+        .chat-input-container {
+            border-top: 1px solid #F0F0F0;
+            padding: 1rem 1.5rem;
+            background: #FFFFFF;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            flex-shrink: 0;
+            box-sizing: border-box;
+        }
+        
+        /* Split view일 때 입력 영역 */
+        .main-container.split-view .chat-input-container {
+            padding: 1rem;
+            position: relative;
+        }
+
+        .chat-input-wrapper {
+            width: 900px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        /* Split view일 때 입력 영역 래퍼 */
+        .main-container.split-view .chat-input-wrapper {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+        }
+
+        .chat-input-box {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-end;
+            background: #FFFFFF;
+            border: 1px solid #D1D5DB;
+            border-radius: 1.5rem;
+            padding: 0.75rem 1.25rem;
+            max-width: 100%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: all 0.2s;
+        }
+
+        .chat-input-box:focus-within {
+            border-color: #2563EB;
+            box-shadow: 0 2px 12px rgba(37, 99, 235, 0.1);
+        }
+
+        .chat-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            resize: none;
+            font-size: 0.9375rem;
+            font-family: inherit;
+            outline: none;
+            max-height: 120px;
+            overflow-y: auto;
+            line-height: 1.6;
+            color: #1F2937;
+        }
+
+        .chat-input::placeholder {
+            color: #9CA3AF;
+        }
+
+        .chat-send-btn {
+            width: 32px;
+            height: 32px;
+            background: #2563EB;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .chat-send-btn:hover:not(:disabled) {
+            background: #1D4ED8;
+            transform: scale(1.05);
+        }
+
+        .chat-send-btn:disabled {
+            background: #D1D5DB;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .chat-send-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* 스크롤 버튼 */
+        .scroll-to-bottom {
+            position: fixed;
+            bottom: 100px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background: #2563EB;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+            z-index: 100;
+        }
+
+        .scroll-to-bottom:hover {
+            background: #1D4ED8;
+            transform: translateY(-2px);
+        }
+
+        .scroll-to-bottom.visible {
+            display: flex;
+        }
+
+        /* 반응형 */
+        @media (max-width: 1024px) {
+            .main-container.split-view {
+                grid-template-columns: 1fr;
+                grid-template-rows: 50% 50%;
+            }
+            
+            .left-panel {
+                border-right: none;
+                border-bottom: 1px solid #E5E7EB;
+            }
+            
+            .chat-messages {
+                width: 100%;
+                max-width: 100%;
+            }
+            
+            .main-container.split-view .chat-messages {
+                flex: 1;
+            }
+            
+            .chat-input-wrapper {
+                width: 100%;
+                max-width: 100%;
+            }
+            
+            .message-bubble {
+                max-width: 85%;
+            }
+        }
+        
+        /* Split view에서 스크롤 버튼 위치 조정 */
+        .main-container.split-view .scroll-to-bottom {
+            right: calc(30% / 2);
+            transform: translateX(50%);
+        }
+        
+        /* 리사이즈 핸들 */
+        .resize-handle {
+            display: none;
+            width: 4px;
+            background: #E5E7EB;
+            cursor: col-resize;
+            transition: background 0.2s;
+            z-index: 20;
+            position: relative;
+        }
+        
+        .resize-handle:hover {
+            background: #2563EB;
+        }
+        
+        .resize-handle:active {
+            background: #1D4ED8;
+        }
+        
+        .main-container.split-view .resize-handle {
+            display: block;
+        }
+        
+        /* Analysis Result Panel (분석 실행 결과) */
+        .analysis-result-panel {
+            display: none;
+            background-color: #FFFFFF;
+            color: #1F2937;
+            height: 100%;
+            overflow-y: auto;
+            padding: 1.5rem;
+        }
+        
+        .main-container.split-view .analysis-result-panel.active {
+            display: block;
+        }
+        
+        .analysis-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 400px;
+        }
+        
+        .analysis-loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #E5E7EB;
+            border-top: 4px solid #2563EB;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .analysis-loading-text {
+            margin-top: 1rem;
+            color: #6B7280;
+            font-size: 0.9375rem;
+        }
+        
+        /* 분석 결과 컨텐츠 */
+        .analysis-content {
+            display: none;
+        }
+        
+        .analysis-content.show {
+            display: block;
+        }
+        
+        .analysis-header {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #E5E7EB;
+        }
+        
+        .analysis-header h2 {
+            font-size: 1.5rem;
+            color: #1F2937;
+            margin-bottom: 0.5rem;
+        }
+        
+        .analysis-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .metric-card {
+            background: #F9FAFB;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #E5E7EB;
+        }
+        
+        .metric-label {
+            font-size: 0.875rem;
+            color: #6B7280;
+            margin-bottom: 0.5rem;
+        }
+        
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #2563EB;
+        }
+    </style>
+</head>
+<body>
+    {% include "components/nav.html" %}
+    
+    <!-- 메인 컨테이너 -->
+    <div class="main-container" id="mainContainer">
+        <!-- 왼쪽 패널 (도구 페이지 iframe) -->
+        <div class="left-panel" id="leftPanel">
+            <iframe id="toolFrame" src="about:blank"></iframe>
+            <!-- 분석 결과 요약 (이탈률 등) -->
+            <div class="analysis-summary" id="analysisSummary" style="display: none;"></div>
+        </div>
+
+        <!-- Execution Panel 제거 (검색 결과는 왼쪽 board_search.html에만 표시) -->
+        
+        <!-- Analysis Result Panel (분석 실행 결과용) -->
+        <div class="analysis-result-panel" id="analysisResultPanel"></div>
+        
+        <!-- 리사이즈 핸들 -->
+        <div class="resize-handle" id="resizeHandle"></div>
+        
+        <!-- 채팅 패널 -->
+        <div class="chat-panel">
+            <!-- 헤더 -->
+            <div class="chat-header">
+                <div class="chat-header-left">
+                    <h1 class="chat-header-title">WebMaster AI Agent</h1>
+                </div>
+                <div class="chat-header-actions">
+                    <button id="newChatBtn" class="btn btn-secondary" title="새 대화">
+                        <span>➕ 새 대화</span>
+                    </button>
+                    <a href="/" class="btn btn-primary" title="홈으로" style="background: #2563EB; color: white; text-decoration: none;">
+                        <span>🏠 홈으로</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 메시지 영역 -->
+            <div id="chatMessages" class="chat-messages">
+                <div class="chat-empty">
+                    <div class="chat-empty-icon">💬</div>
+                    <div class="chat-empty-text">
+                        질문을 입력하면 AI가 답변해드립니다.
+                    </div>
+                </div>
+            </div>
+
+            <!-- 입력 영역 -->
+            <div class="chat-input-container">
+                <div class="chat-input-wrapper">
+                    <div class="chat-input-box">
+                        <textarea 
+                            id="chatInput" 
+                            class="chat-input" 
+                            placeholder="무엇이든 물어보세요"
+                            rows="1"
+                        ></textarea>
+                        <button id="chatSendBtn" class="chat-send-btn" title="전송">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 스크롤 버튼 -->
+            <button id="scrollToBottom" class="scroll-to-bottom" title="맨 아래로">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px;">
+                    <path d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', path='/js/app.js') }}"></script>
+    
+    <script>
+        const API_BASE_URL = window.location.origin;
+        let isProcessing = false;
+        let sessionId = null;
+        let currentToolId = null;
+        
+        // 검색 상태 저장 (목록 돌아가기용)
+        let lastSearchData = null;
+
+        // 도구별 페이지 매핑
+        const toolPageMap = {
+            'semantic_search_tool': '/board/search',
+            'churn_analysis_tool': '/churn',
+            'ethics_check_tool': '/ethics_dashboard',
+            'match_reports_tool': '/admin/reports',
+            'trends_analysis_tool': '/trends'
+        };
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            sessionId = generateSessionId();
+            
+            // URL에서 초기 질문 가져오기
+            const urlParams = new URLSearchParams(window.location.search);
+            const initialQuery = urlParams.get('q');
+            if (initialQuery) {
+                document.getElementById('chatInput').value = initialQuery;
+                setTimeout(() => sendMessage(), 500);
+            }
+            
+            // 이벤트 리스너
+            document.getElementById('chatSendBtn').addEventListener('click', sendMessage);
+            document.getElementById('chatInput').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+            document.getElementById('newChatBtn').addEventListener('click', resetChat);
+            document.getElementById('scrollToBottom').addEventListener('click', scrollToBottom);
+            
+            // 텍스트 영역 자동 높이 조절
+            const textarea = document.getElementById('chatInput');
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+            });
+
+            // 스크롤 버튼 표시/숨김
+            const messagesContainer = document.getElementById('chatMessages');
+            messagesContainer.addEventListener('scroll', function() {
+                const scrollBtn = document.getElementById('scrollToBottom');
+                const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop <= messagesContainer.clientHeight + 50;
+                scrollBtn.classList.toggle('visible', !isAtBottom);
+            });
+            
+            // 리사이즈 핸들 이벤트
+            initResizeHandle();
+        });
+        
+        // 리사이즈 핸들 초기화
+        function initResizeHandle() {
+            const resizeHandle = document.getElementById('resizeHandle');
+            const mainContainer = document.getElementById('mainContainer');
+            let isResizing = false;
+            let startX = 0;
+            let startLeftWidth = 0;
+            
+            resizeHandle.addEventListener('mousedown', function(e) {
+                isResizing = true;
+                startX = e.clientX;
+                const leftPanel = document.querySelector('.left-panel.active, .analysis-result-panel.active');
+                startLeftWidth = leftPanel ? leftPanel.offsetWidth : window.innerWidth * 0.7;
+                
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            });
+            
+            document.addEventListener('mousemove', function(e) {
+                if (!isResizing) return;
+                
+                const diffX = e.clientX - startX;
+                const newLeftWidth = ((startLeftWidth + diffX) / window.innerWidth) * 100;
+                
+                // 최소/최대 제한 (50% ~ 85%)
+                if (newLeftWidth >= 50 && newLeftWidth <= 85) {
+                    const rightWidth = 100 - newLeftWidth - 0.4; // 4px for handle
+                    mainContainer.style.gridTemplateColumns = `${newLeftWidth}% 4px ${rightWidth}%`;
+                }
+            });
+            
+            document.addEventListener('mouseup', function() {
+                if (isResizing) {
+                    isResizing = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        }
+
+        // 세션 ID 생성
+        function generateSessionId() {
+            return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        }
+
+        // iframe 로딩 완료 여부 추적
+        let iframeLoaded = false;
+        let pendingMessage = null;
+        
+        // Split View 전환
+        function enableSplitView(toolId, panelType = 'auto') {
+            console.log('enableSplitView 호출:', toolId, panelType);
+            const mainContainer = document.getElementById('mainContainer');
+            const leftPanel = document.getElementById('leftPanel');
+            const analysisResultPanel = document.getElementById('analysisResultPanel');
+            const toolFrame = document.getElementById('toolFrame');
+
+            if (!mainContainer || !leftPanel || !analysisResultPanel) {
+                console.error('필요한 요소를 찾을 수 없습니다');
+                return;
+            }
+
+            // split-view 클래스 추가
+            mainContainer.classList.add('split-view');
+            
+            // 초기 그리드 설정 (70:30 - 페이지:대화)
+            mainContainer.style.gridTemplateColumns = '70% 4px calc(30% - 4px)';
+            
+            console.log('split-view 클래스 추가됨');
+
+            // 모든 패널 비활성화
+            leftPanel.classList.remove('active');
+            analysisResultPanel.classList.remove('active');
+            
+            // panelType에 따라 패널 선택
+            if (panelType === 'analysis') {
+                console.log('분석 결과 패널 표시');
+                analysisResultPanel.classList.add('active');
+            } else {
+                // iframe으로 페이지 로드 (검색 결과도 board_search.html로 표시)
+                console.log('도구 페이지 로드:', toolId);
+                leftPanel.classList.add('active');
+                
+                const pageUrl = toolPageMap[toolId];
+                console.log('페이지 URL:', pageUrl);
+                if (pageUrl) {
+                    // iframe이 이미 같은 페이지를 로드 중이면 onload 이벤트가 발생하지 않을 수 있음
+                    if (toolFrame.src !== window.location.origin + pageUrl) {
+                        iframeLoaded = false;
+                        console.log('[DEBUG] iframe src 변경, iframeLoaded = false');
+                        
+                        // onload 이벤트 리스너 추가
+                        toolFrame.onload = function() {
+                            console.log('[DEBUG] iframe onload 이벤트 발생');
+                            iframeLoaded = true;
+                            
+                            // 대기 중인 메시지가 있으면 전송
+                            if (pendingMessage) {
+                                console.log('[DEBUG] 대기 중인 메시지 전송:', pendingMessage);
+                                sendBoardCommand(pendingMessage.command, pendingMessage.data);
+                                pendingMessage = null;
+                            }
+                        };
+                        
+                        toolFrame.src = pageUrl;
+                        console.log('iframe src 설정:', pageUrl);
+                    } else {
+                        console.log('[DEBUG] iframe이 이미 같은 페이지 로드 중, iframeLoaded = true');
+                        iframeLoaded = true;
+                    }
+                } else {
+                    console.warn('도구에 대한 페이지 URL이 없습니다:', toolId);
+                }
+            }
+        }
+
+        // 단일 패널로 복귀
+        function disableSplitView() {
+            console.log('disableSplitView 호출');
+            const mainContainer = document.getElementById('mainContainer');
+            const leftPanel = document.getElementById('leftPanel');
+            const analysisResultPanel = document.getElementById('analysisResultPanel');
+            const analysisSummary = document.getElementById('analysisSummary');
+            const toolFrame = document.getElementById('toolFrame');
+
+            if (mainContainer) {
+                mainContainer.classList.remove('split-view');
+                mainContainer.style.gridTemplateColumns = '';
+            }
+            if (leftPanel) {
+                leftPanel.classList.remove('active');
+                leftPanel.classList.remove('with-analysis');
+            }
+            if (analysisResultPanel) {
+                analysisResultPanel.classList.remove('active');
+            }
+            if (analysisSummary) {
+                analysisSummary.style.display = 'none';
+                analysisSummary.innerHTML = '';
+            }
+            if (toolFrame) {
+                toolFrame.src = 'about:blank';
+            }
+            currentToolId = null;
+        }
+        
+        // postMessage로 iframe에 메시지 전송
+        function sendMessageToToolFrame(type, data) {
+            const toolFrame = document.getElementById('toolFrame');
+            if (toolFrame && toolFrame.contentWindow) {
+                console.log('sendMessageToToolFrame:', type, data);
+                toolFrame.contentWindow.postMessage({ type, data }, window.location.origin);
+            } else {
+                console.warn('toolFrame not ready for postMessage');
+            }
+        }
+        
+        // 게시판 명령 전송
+        function sendBoardCommand(command, data) {
+            const toolFrame = document.getElementById('toolFrame');
+            console.log('[DEBUG] sendBoardCommand 호출:', command, data);
+            console.log('[DEBUG] toolFrame.src:', toolFrame ? toolFrame.src : 'null');
+            console.log('[DEBUG] iframeLoaded:', iframeLoaded);
+            
+            if (!toolFrame) {
+                console.error('[ERROR] toolFrame이 존재하지 않습니다');
+                return;
+            }
+            
+            if (!toolFrame.src.includes('/board/search')) {
+                console.warn('[WARN] Board frame이 /board/search를 로드하지 않음');
+                console.warn('[WARN] toolFrame.src:', toolFrame.src);
+                return;
+            }
+            
+            // iframe이 로딩되지 않았으면 대기
+            if (!iframeLoaded) {
+                console.log('[DEBUG] iframe이 아직 로딩 중, 메시지 대기열에 추가');
+                pendingMessage = { command, data };
+                return;
+            }
+            
+            console.log('[DEBUG] postMessage 전송 중...', {
+                type: command,
+                data: data,
+                origin: window.location.origin
+            });
+            
+            try {
+                toolFrame.contentWindow.postMessage({
+                    type: command,
+                    data: data
+                }, window.location.origin);
+                console.log('[DEBUG] postMessage 전송 완료');
+            } catch (error) {
+                console.error('[ERROR] postMessage 전송 실패:', error);
+            }
+        }
+        
+        // 분석 실행 함수
+        async function executeAction(endpoint, params, actionType = 'analysis') {
+            console.log('executeAction 호출:', endpoint, params, actionType);
+            
+            // 실행 모드에서는 항상 analysisResultPanel 사용
+            const analysisResultPanel = document.getElementById('analysisResultPanel');
+            
+            // 로딩 표시
+            const loadingText = actionType === 'report_action' ? '신고를 처리 중입니다...' : '분석을 실행 중입니다...';
+            analysisResultPanel.innerHTML = `
+                <div class="analysis-loading">
+                    <div class="analysis-loading-spinner"></div>
+                    <div class="analysis-loading-text">${loadingText}</div>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(params)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API 요청 실패: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('실행 결과:', data);
+                
+                // 결과 렌더링
+                if (actionType === 'report_action') {
+                    renderReportActionResult(data, params);
+                } else {
+                    renderAnalysisResult(data, endpoint);
+                }
+                
+            } catch (error) {
+                console.error('실행 오류:', error);
+                analysisResultPanel.innerHTML = `
+                    <div class="analysis-loading">
+                        <div class="analysis-loading-text" style="color: #EF4444;">
+                            ⚠️ 실행 중 오류가 발생했습니다.<br>
+                            ${error.message}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        // 신고 액션 결과 렌더링
+        function renderReportActionResult(data, params) {
+            const analysisResultPanel = document.getElementById('analysisResultPanel');
+            const isApprove = params.action === 'approve';
+            const actionText = isApprove ? '승인' : '거부';
+            const iconColor = isApprove ? '#10B981' : '#EF4444';
+            const icon = isApprove ? '✅' : '❌';
+            
+            let html = `
+                <div class="analysis-content show">
+                    <div class="analysis-header">
+                        <h2 style="color: ${iconColor};">${icon} 신고 ${actionText} 완료</h2>
+                    </div>
+                    
+                    <div style="padding: 2rem; text-align: center;">
+                        <div style="font-size: 4rem; margin-bottom: 1rem;">${icon}</div>
+                        <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937; margin-bottom: 0.5rem;">
+                            ${data.message || `신고가 ${actionText}되었습니다`}
+                        </div>
+            `;
+            
+            if (data.success) {
+                html += `
+                        <div style="margin-top: 1.5rem; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem; text-align: left;">
+                            <div style="font-weight: 600; margin-bottom: 0.5rem;">처리 정보:</div>
+                            <div style="color: #6B7280; font-size: 0.875rem;">
+                                • 처리 결과: <span style="color: ${iconColor}; font-weight: 600;">${actionText}</span><br>
+                                ${params.note ? `• 처리 사유: ${escapeHtml(params.note)}<br>` : ''}
+                                • 처리 시간: ${new Date().toLocaleString('ko-KR')}
+                            </div>
+                        </div>
+                `;
+            }
+            
+            html += `
+                    </div>
+                </div>
+            `;
+            
+            analysisResultPanel.innerHTML = html;
+            
+            // 왼쪽 패널의 신고 목록 새로고침 (postMessage 사용)
+            const toolFrame = document.getElementById('toolFrame');
+            if (toolFrame && toolFrame.src.includes('/admin/reports')) {
+                setTimeout(() => {
+                    sendMessageToToolFrame('reload_reports', {});
+                }, 300); // 빠른 반영
+            }
+        }
+        
+        // 분석 결과 렌더링
+        function renderAnalysisResult(data, endpoint) {
+            if (endpoint.includes('/churn/analysis/run')) {
+                // 이탈 분석 실행 결과는 analysisResultPanel에 렌더링
+                const analysisResultPanel = document.getElementById('analysisResultPanel');
+                renderChurnAnalysisResult(data, analysisResultPanel);
+            } else if (endpoint.includes('/ethics/analyze')) {
+                // 비윤리 분석 결과는 analysisResultPanel에 렌더링
+                const analysisResultPanel = document.getElementById('analysisResultPanel');
+                renderEthicsAnalysisResult(data, analysisResultPanel);
+            } else {
+                // 기본 JSON 렌더링
+                const analysisResultPanel = document.getElementById('analysisResultPanel');
+                analysisResultPanel.innerHTML = `
+                    <div class="analysis-content show">
+                        <div class="analysis-header">
+                            <h2>분석 결과</h2>
+                        </div>
+                        <pre style="background: #F9FAFB; padding: 1rem; border-radius: 0.5rem; overflow: auto;">
+${JSON.stringify(data, null, 2)}
+                        </pre>
+                    </div>
+                `;
+            }
+        }
+        
+        // 이탈 분석 결과 렌더링
+        function renderChurnAnalysisResult(data, container) {
+            const metrics = data.metrics || {};
+            const totalUsers = metrics.active_users || 0;
+            const churnedUsers = metrics.churned_users || 0;
+            const churnRate = metrics.churn_rate || 0;
+            const insights = data.insights || [];
+            const topRisks = data.top_risks || [];
+            
+            let html = `
+                <div class="analysis-content show" style="max-height: calc(100vh - 2rem); overflow-y: auto;">
+                    <div class="analysis-header">
+                        <h2>📊 이탈 분석 결과</h2>
+                        <p style="color: #6B7280; font-size: 0.875rem;">
+                            기간: ${data.start_month || 'N/A'} ~ ${data.end_month || 'N/A'}
+                        </p>
+                    </div>
+                    
+                    <div class="analysis-metrics">
+                        <div class="metric-card">
+                            <div class="metric-label">전체 사용자</div>
+                            <div class="metric-value">${totalUsers.toLocaleString()}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">이탈 사용자</div>
+                            <div class="metric-value" style="color: #EF4444;">${churnedUsers.toLocaleString()}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">이탈률</div>
+                            <div class="metric-value" style="color: #F59E0B;">${churnRate.toFixed(1)}%</div>
+                        </div>
+                    </div>
+            `;
+            
+            // AI 인사이트 리포트
+            if (insights && insights.length > 0) {
+                html += `
+                    <div style="margin-top: 1.5rem; padding: 1.25rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 0.75rem; color: white;">
+                        <h3 style="font-size: 1.125rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 1.5rem;">🤖</span> AI 기반 인사이트 리포트
+                        </h3>
+                        <ul style="list-style: none; padding: 0; margin: 0;">
+                `;
+                
+                insights.forEach((insight, idx) => {
+                    html += `
+                        <li style="padding: 0.75rem 0; border-bottom: 1px solid rgba(255,255,255,0.2); display: flex; gap: 0.75rem;">
+                            <span style="flex-shrink: 0; width: 1.5rem; height: 1.5rem; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.875rem; font-weight: 600;">
+                                ${idx + 1}
+                            </span>
+                            <span style="flex: 1; line-height: 1.6;">${escapeHtml(insight)}</span>
+                        </li>
+                    `;
+                });
+                
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // 권장 액션 섹션
+            const actions = data.actions || [];
+            if (actions && actions.length > 0) {
+                html += `
+                    <div style="margin-top: 1.5rem; padding: 1.25rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 0.75rem; color: white;">
+                        <h3 style="font-size: 1.125rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 1.5rem;">💡</span> 권장 액션
+                        </h3>
+                        <ul style="list-style: none; padding: 0; margin: 0;">
+                `;
+                
+                actions.forEach((action, idx) => {
+                    html += `
+                        <li style="padding: 0.75rem 0; border-bottom: 1px solid rgba(255,255,255,0.2); display: flex; gap: 0.75rem;">
+                            <span style="flex-shrink: 0; width: 1.5rem; height: 1.5rem; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.875rem; font-weight: 600;">
+                                ${idx + 1}
+                            </span>
+                            <span style="flex: 1; line-height: 1.6;">${escapeHtml(action)}</span>
+                        </li>
+                    `;
+                });
+                
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // Top 위험 요인
+            if (topRisks && topRisks.length > 0) {
+                html += `
+                    <div style="margin-top: 1.5rem;">
+                        <h3 style="font-size: 1.125rem; margin-bottom: 1rem; color: #1F2937; display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="color: #EF4444;">⚠️</span> 주요 위험 요인 (Top 3)
+                        </h3>
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                `;
+                
+                topRisks.forEach((risk, idx) => {
+                    const colors = ['#EF4444', '#F59E0B', '#F97316'];
+                    const color = colors[idx] || '#6B7280';
+                    html += `
+                        <div style="padding: 1rem; background: #F9FAFB; border-left: 4px solid ${color}; border-radius: 0.375rem;">
+                            <div style="font-weight: 600; color: #1F2937; margin-bottom: 0.25rem;">
+                                ${idx + 1}. ${escapeHtml(risk.factor || risk.description || '알 수 없음')}
+                            </div>
+                            <div style="font-size: 0.875rem; color: #6B7280;">
+                                영향도: <span style="color: ${color}; font-weight: 600;">${(risk.impact || risk.churn_rate || 0).toFixed(1)}%</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 세그먼트별 분석 결과
+            if (data.segments && data.segments.length > 0) {
+                html += `
+                    <div style="margin-top: 1.5rem;">
+                        <h3 style="font-size: 1.125rem; margin-bottom: 1rem; color: #1F2937;">세그먼트별 분석</h3>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #F9FAFB; border-bottom: 2px solid #E5E7EB;">
+                                        <th style="padding: 0.75rem; text-align: left;">세그먼트</th>
+                                        <th style="padding: 0.75rem; text-align: right;">값</th>
+                                        <th style="padding: 0.75rem; text-align: right;">전체</th>
+                                        <th style="padding: 0.75rem; text-align: right;">이탈</th>
+                                        <th style="padding: 0.75rem; text-align: right;">이탈률</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+                
+                data.segments.forEach(seg => {
+                    const rate = seg.churn_rate || 0;
+                    const color = rate > 50 ? '#EF4444' : rate > 30 ? '#F59E0B' : '#10B981';
+                    html += `
+                        <tr style="border-bottom: 1px solid #E5E7EB;">
+                            <td style="padding: 0.75rem;">${seg.segment_name || 'N/A'}</td>
+                            <td style="padding: 0.75rem; text-align: right;">${seg.segment_value || 'N/A'}</td>
+                            <td style="padding: 0.75rem; text-align: right;">${(seg.total_users || 0).toLocaleString()}</td>
+                            <td style="padding: 0.75rem; text-align: right;">${(seg.churned_users || 0).toLocaleString()}</td>
+                            <td style="padding: 0.75rem; text-align: right; color: ${color}; font-weight: 600;">${rate.toFixed(1)}%</td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+        
+        // 비윤리 분석 결과 렌더링
+        function renderEthicsAnalysisResult(data, container) {
+            const score = data.score || 0;
+            const spamScore = data.spam || 0;
+            
+            const scoreColor = score >= 70 ? '#EF4444' : score >= 40 ? '#F59E0B' : '#10B981';
+            const spamColor = spamScore >= 70 ? '#EF4444' : spamScore >= 40 ? '#F59E0B' : '#10B981';
+            
+            container.innerHTML = `
+                <div class="analysis-content show">
+                    <div class="analysis-header">
+                        <h2>⚠️ 비윤리/스팸 분석 결과</h2>
+                    </div>
+                    
+                    <div class="analysis-metrics">
+                        <div class="metric-card">
+                            <div class="metric-label">비윤리 점수</div>
+                            <div class="metric-value" style="color: ${scoreColor};">${score}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">스팸 점수</div>
+                            <div class="metric-value" style="color: ${spamColor};">${spamScore}</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 1.5rem; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: #1F2937;">분석된 텍스트</h3>
+                        <p style="color: #4B5563; line-height: 1.6;">${escapeHtml(data.text || '')}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 메시지 전송
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            
+            if (!message || isProcessing) return;
+
+            isProcessing = true;
+            document.getElementById('chatSendBtn').disabled = true;
+
+            // 빈 화면 제거
+            const messagesContainer = document.getElementById('chatMessages');
+            const emptyDiv = messagesContainer.querySelector('.chat-empty');
+            if (emptyDiv) {
+                emptyDiv.remove();
+            }
+
+            // 사용자 메시지 추가
+            addMessage('user', message);
+            input.value = '';
+            input.style.height = 'auto';
+
+            // 봇 응답 생성
+            await generateBotResponse(message);
+
+            isProcessing = false;
+            document.getElementById('chatSendBtn').disabled = false;
+        }
+
+        // 메시지 추가
+        function addMessage(type, content, toolBadge = null, pageUrl = null) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            let messageHTML = `
+                <div class="message-bubble">
+                    <div class="message-content">${escapeHtml(content)}</div>
+            `;
+
+            if (toolBadge) {
+                messageHTML += `<div class="tool-badge">🛠️ ${toolBadge}</div>`;
+            }
+
+            if (pageUrl) {
+                const pageName = getPageName(pageUrl);
+                messageHTML += `
+                    <a href="${pageUrl}" class="page-action-btn" target="_blank">
+                        📊 ${pageName} 바로가기
+                    </a>
+                `;
+            }
+
+            messageHTML += '</div>';
+            messageDiv.innerHTML = messageHTML;
+            messagesContainer.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        // 봇 응답 생성
+        async function generateBotResponse(userMessage) {
+            // 로딩 메시지
+            addMessage('bot', 'Agent가 질문을 분석하고 답변을 생성하고 있습니다...', 'LangGraph 처리 중 ●●●');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/agent/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: userMessage,
+                        session_id: sessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Agent 응답 생성 중 오류가 발생했습니다.');
+                }
+
+                const data = await response.json();
+
+                // 로딩 메시지 제거
+                const messages = document.getElementById('chatMessages');
+                messages.removeChild(messages.lastChild);
+
+                // 디버깅
+                console.log('Agent 응답 데이터:', data);
+                console.log('tool_id:', data.tool_id);
+                console.log('tool_used:', data.tool_used);
+                console.log('action_type:', data.action_type);
+
+                // 도구 사용 여부 확인
+                const hasTool = data.tool_used && 
+                               data.tool_used !== '없음' &&
+                               data.tool_used !== null &&
+                               data.tool_used !== undefined;
+
+                if (hasTool) {
+                    let actualToolId = data.tool_id;
+                    
+                    // tool_id가 없으면 tool_used에서 역매핑
+                    if (!actualToolId || actualToolId === '없음' || actualToolId === null) {
+                        const toolNameReverseMap = {
+                            '의미 기반 검색': 'semantic_search_tool',
+                            '이탈 분석': 'churn_analysis_tool',
+                            '비윤리/스팸 분석': 'ethics_check_tool',
+                            '신고 통계': 'match_reports_tool',
+                            '트렌드 분석': 'trends_analysis_tool',
+                            '이탈 분석 실행': 'execute_churn_analysis_tool',
+                            '비윤리/스팸 분석 실행': 'execute_ethics_analysis_tool',
+                            '신고 승인': 'approve_report_tool',
+                            '신고 거부': 'reject_report_tool',
+                            '일일 보고서': 'daily_report_tool'
+                        };
+                        actualToolId = toolNameReverseMap[data.tool_used] || data.tool_used;
+                    }
+                    
+                    currentToolId = actualToolId;
+                    
+                    // action_type이 execute인 경우 실행 처리
+                    if (data.action_type === 'execute' && data.execution_data) {
+                        console.log('실행 명령 처리:', data.execution_data);
+                        
+                        const executionAction = data.execution_data.action;
+                        
+                        // 필터링 액션인 경우
+                        if (executionAction === 'filter_reports') {
+                            console.log('필터링 처리:', data.execution_data.filter_params);
+                            
+                            // 왼쪽 패널에 admin_reports 표시
+                            enableSplitView('match_reports_tool', 'auto');
+                            
+                            // iframe 로드 후 postMessage로 필터 적용
+                            setTimeout(() => {
+                                sendMessageToToolFrame('filter_reports', data.execution_data.filter_params);
+                            }, 500);
+                            
+                            // 필터링 결과 조회 및 요약 표시
+                            executeFilterAction(data.execution_data.api_endpoint, data.execution_data.filter_params);
+                            
+                        } else if (executionAction === 'show_post_detail') {
+                            // 게시글 상세보기 액션 - iframe을 게시글 상세 페이지로 변경
+                            console.log('[DEBUG] 게시글 상세보기 처리:', executionAction, data.execution_data.params);
+                            
+                            let postId = data.execution_data.params.post_id;
+                            const relativePosition = data.execution_data.params.relative_position;
+                            
+                            console.log('[DEBUG] postId:', postId, 'relativePosition:', relativePosition);
+                            
+                            // relative_position으로 postId 찾기
+                            if (!postId && relativePosition) {
+                                // 위치 매핑
+                                const positionMap = {
+                                    '첫번째': 0, '첫째': 0, '1번째': 0, 'first': 0,
+                                    '두번째': 1, '둘째': 1, '2번째': 1, 'second': 1,
+                                    '세번째': 2, '셋째': 2, '3번째': 2, 'third': 2,
+                                    '네번째': 3, '넷째': 3, '4번째': 3, 'fourth': 3,
+                                    '다섯번째': 4, '다섯째': 4, '5번째': 4, 'fifth': 4,
+                                    '여섯번째': 5, '여섯째': 5, '6번째': 5, 'sixth': 5,
+                                    '일곱번째': 6, '일곱째': 6, '7번째': 6, 'seventh': 6,
+                                    '여덟번째': 7, '여덟째': 7, '8번째': 7, 'eighth': 7,
+                                    '아홉번째': 8, '아홉째': 8, '9번째': 8, 'ninth': 8,
+                                    '열번째': 9, '열째': 9, '10번째': 9, 'tenth': 9
+                                };
+                                
+                                const index = positionMap[relativePosition.toLowerCase()];
+                                
+                                if (index !== undefined) {
+                                    // 검색 결과에서 postId 찾기
+                                    if (lastSearchData && lastSearchData.post_ids && lastSearchData.post_ids.length > index) {
+                                        postId = lastSearchData.post_ids[index];
+                                        console.log('[DEBUG] 검색 결과에서 postId 찾음:', postId);
+                                    } else {
+                                        console.log('[DEBUG] 검색 결과 없음, 기본 게시글 목록에서 찾기 위해 API 호출');
+                                        // 전체 게시글 목록에서 찾기
+                                        fetch('/api/board/posts?page=1&limit=50')
+                                            .then(res => res.json())
+                                            .then(result => {
+                                                if (result.success && result.posts && result.posts.length > index) {
+                                                    postId = result.posts[index].id;
+                                                    console.log('[DEBUG] 전체 목록에서 postId 찾음:', postId);
+                                                    
+                                                    // Split view 활성화 후 상세 페이지로 이동
+                                                    enableSplitView('semantic_search_tool', 'auto');
+                                                    setTimeout(() => {
+                                                        const toolFrame = document.getElementById('toolFrame');
+                                                        toolFrame.src = `/board/${postId}`;
+                                                        console.log('[DEBUG] iframe을 게시글 상세 페이지로 변경:', `/board/${postId}`);
+                                                    }, 500);
+                                                } else {
+                                                    console.error('[ERROR] 게시글을 찾을 수 없음');
+                                                    addMessage('bot', `${relativePosition} 게시글을 찾을 수 없습니다.`);
+                                                }
+                                            })
+                                            .catch(err => {
+                                                console.error('[ERROR] API 호출 실패:', err);
+                                                addMessage('bot', '게시글 목록을 불러올 수 없습니다.');
+                                            });
+                                        return; // async 처리이므로 여기서 종료
+                                    }
+                                }
+                            }
+                            
+                            if (postId) {
+                                // Split view 활성화 후 상세 페이지로 이동
+                                enableSplitView('semantic_search_tool', 'auto');
+                                
+                                setTimeout(() => {
+                                    const toolFrame = document.getElementById('toolFrame');
+                                    toolFrame.src = `/board/${postId}`;
+                                    console.log('[DEBUG] iframe을 게시글 상세 페이지로 변경:', `/board/${postId}`);
+                                }, 500);
+                            } else {
+                                console.error('[ERROR] postId를 찾을 수 없음');
+                                addMessage('bot', '게시글 ID 또는 위치를 찾을 수 없습니다.');
+                            }
+                            
+                        } else if (executionAction === 'back_to_list') {
+                            // 목록 돌아가기 액션 처리
+                            console.log('목록 돌아가기 처리:', executionAction, data.execution_data.params);
+                            
+                            const requestType = data.execution_data.params.request_type;
+                            
+                            if (requestType === 'show_search_results' && lastSearchData) {
+                                // 이전 검색 결과가 있으면 board_search.html로 복원
+                                console.log('검색 결과 복원:', lastSearchData);
+                                enableSplitView('semantic_search_tool', 'auto');
+                                
+                                setTimeout(() => {
+                                    sendBoardCommand('load_search_results', lastSearchData);
+                                }, 100);
+                                
+                            } else if (requestType === 'back_to_list' && lastSearchData) {
+                                // 이전 목록으로 돌아가기 (검색 결과가 있으면 검색 결과로)
+                                console.log('이전 목록으로 돌아가기 (검색 결과):', lastSearchData);
+                                enableSplitView('semantic_search_tool', 'auto');
+                                
+                                setTimeout(() => {
+                                    sendBoardCommand('load_search_results', lastSearchData);
+                                }, 100);
+                                
+                            } else {
+                                // 검색 결과가 없거나 일반 게시판 목록 요청
+                                console.log('일반 게시판 목록 표시');
+                                enableSplitView('semantic_search_tool', 'auto');
+                                
+                                setTimeout(() => {
+                                    const toolFrame = document.getElementById('toolFrame');
+                                    toolFrame.src = '/board';
+                                    console.log('게시판 목록 로드: /board');
+                                }, 100);
+                            }
+                            
+                        } else if (executionAction === 'filter_category' || executionAction === 'change_sort' || executionAction === 'navigate_page') {
+                            // 게시판 조작 액션
+                            console.log('게시판 조작 처리:', executionAction, data.execution_data.params);
+                            
+                            // 게시판이 이미 로드되어 있는지 확인
+                            const toolFrame = document.getElementById('toolFrame');
+                            if (toolFrame && toolFrame.src.includes('/board/search')) {
+                                // 게시판 명령 전송
+                                setTimeout(() => {
+                                    if (executionAction === 'filter_category') {
+                                        sendBoardCommand('filter_category', { category: data.execution_data.params.category });
+                                    } else if (executionAction === 'change_sort') {
+                                        sendBoardCommand('change_sort', { sort_by: data.execution_data.params.sort_by });
+                                    } else if (executionAction === 'navigate_page') {
+                                        sendBoardCommand('navigate_page', { page: data.execution_data.params.page });
+                                    }
+                                }, 100);
+                            } else {
+                                // 게시판이 로드되지 않은 경우 안내
+                                addMessage('bot', '먼저 게시판을 검색하거나 표시해주세요.');
+                            }
+                            
+                        } else {
+                            // 분석 또는 신고 처리 액션
+                            // 액션 타입 판단
+                            const isReportAction = actualToolId === 'approve_report_tool' || actualToolId === 'reject_report_tool';
+                            const isChurnAnalysis = actualToolId === 'execute_churn_analysis_tool' || actualToolId === 'churn_analysis_tool';
+                            const isEthicsAnalysis = actualToolId === 'execute_ethics_analysis_tool';
+                            const actionType = isReportAction ? 'report_action' : 'analysis';
+                            
+                            // 왼쪽 패널 설정
+                            if (isReportAction) {
+                                // 신고 처리인 경우 왼쪽에 신고 목록, 오른쪽에 처리 결과
+                                enableSplitView('match_reports_tool', 'auto');
+                                // 오른쪽 분석 결과 패널 활성화
+                                enableSplitView(data.execution_data.tool_id || actualToolId, 'analysis');
+                            } else if (isChurnAnalysis) {
+                                // 이탈률 분석 실행인 경우 왼쪽에 분석 결과만 표시
+                                enableSplitView('churn_analysis_tool', 'analysis');
+                                // executeAction에서 analysisResultPanel에 렌더링
+                            } else if (isEthicsAnalysis) {
+                                // 비윤리 분석인 경우 왼쪽에 비윤리 대시보드, 오른쪽에 결과
+                                enableSplitView('ethics_check_tool', 'auto');
+                                enableSplitView(data.execution_data.tool_id || actualToolId, 'analysis');
+                            }
+                            
+                            // API 호출 실행
+                            executeAction(data.execution_data.api_endpoint, data.execution_data.params, actionType);
+                        }
+                        
+                    } else {
+                        // 조회 모드
+                        console.log('Split view 활성화 (조회):', actualToolId);
+                        
+                        // semantic_search_tool은 왼쪽 패널에 게시판 표시
+                        if (actualToolId === 'semantic_search_tool') {
+                            enableSplitView(actualToolId, 'auto');
+                            
+                            // 검색 결과에서 게시글 ID, 검색어, 메타데이터 추출
+                            const boardIds = extractBoardIds(data.answer);
+                            const searchQuery = extractSearchQuery(data.answer);
+                            const searchMetadata = extractSearchMetadata(data.answer);
+                            
+                            console.log('[DEBUG] 추출된 board_ids:', boardIds);
+                            console.log('[DEBUG] 추출된 search_query:', searchQuery);
+                            console.log('[DEBUG] 추출된 search_metadata:', searchMetadata);
+                            console.log('[DEBUG] Agent 응답:', data.answer);
+                            
+                            // 검색 상태 저장 (목록 돌아가기용)
+                            lastSearchData = {
+                                post_ids: boardIds,
+                                search_query: searchQuery,
+                                search_metadata: searchMetadata
+                            };
+                            console.log('[DEBUG] 검색 상태 저장:', lastSearchData);
+                            
+                            // iframe 로드 후 검색 결과 전달
+                            setTimeout(() => {
+                                console.log('[DEBUG] sendBoardCommand 호출 시도');
+                                sendBoardCommand('load_search_results', {
+                                    post_ids: boardIds,
+                                    search_query: searchQuery,
+                                    search_metadata: searchMetadata
+                                });
+                            }, 1000);
+                        } else if (actualToolId === 'daily_report_tool') {
+                            // 일일 보고서 도구는 단일 패널 유지 (도구 미사용 UI)
+                            console.log('일일 보고서 도구 - 단일 패널 유지');
+                            disableSplitView();
+                        } else {
+                            // 다른 도구는 iframe
+                            enableSplitView(actualToolId, 'auto');
+                        }
+                    }
+                } else {
+                    // 도구를 사용하지 않으면 단일 패널 유지
+                    console.log('단일 패널 유지 (도구 미사용)');
+                    disableSplitView();
+                }
+
+                // 최종 응답 추가
+                addMessage('bot', data.answer, data.tool_used, data.page_url);
+
+            } catch (error) {
+                console.error('Agent 응답 오류:', error);
+                
+                // 로딩 메시지 제거
+                const messages = document.getElementById('chatMessages');
+                messages.removeChild(messages.lastChild);
+
+                addMessage('bot', `⚠️ 오류가 발생했습니다: ${error.message}\n\n서버가 실행 중인지 확인하고 OpenAI API 키가 올바른지 확인해주세요.`);
+                disableSplitView();
+            }
+        }
+
+        // renderSearchResults, parseSearchResults, openPostDetail 함수 제거됨
+        // 검색 결과는 왼쪽 board_search.html에서 처리
+
+        // HTML 이스케이프
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 검색 결과에서 게시글 ID 목록 추출
+        function extractBoardIds(answer) {
+            try {
+                console.log('[DEBUG] extractBoardIds 호출, answer 길이:', answer.length);
+                
+                // 방법 1: [BOARD_IDS]: [1,2,3] 형식
+                const match = answer.match(/\[BOARD_IDS\]:\s*(\[.*?\])/);
+                if (match) {
+                    console.log('[DEBUG] BOARD_IDS 패턴 매칭 성공:', match[1]);
+                    const ids = JSON.parse(match[1]);
+                    console.log('[DEBUG] 파싱된 IDs:', ids);
+                    return ids;
+                }
+                
+                // 방법 2: 응답에서 숫자 ID 추출 시도 (fallback)
+                console.log('[DEBUG] BOARD_IDS 패턴 매칭 실패, fallback 시도');
+                const idMatches = answer.match(/게시글\s+ID:\s*(\d+)/g);
+                if (idMatches) {
+                    const ids = idMatches.map(m => parseInt(m.match(/\d+/)[0]));
+                    console.log('[DEBUG] Fallback으로 추출된 IDs:', ids);
+                    return ids;
+                }
+                
+                console.warn('[WARN] board_ids 추출 실패');
+                return [];
+            } catch (e) {
+                console.error('[ERROR] 게시글 ID 추출 실패:', e);
+                return [];
+            }
+        }
+        
+        // 검색 결과에서 검색어 추출
+        function extractSearchQuery(answer) {
+            try {
+                const match = answer.match(/\[SEARCH_QUERY\]:\s*(.+)/);
+                if (match) {
+                    return match[1].trim();
+                }
+                return '';
+            } catch (e) {
+                console.error('검색어 추출 실패:', e);
+                return '';
+            }
+        }
+        
+        // 검색 결과에서 메타데이터 추출
+        function extractSearchMetadata(answer) {
+            try {
+                // 멀티라인 매칭 지원 ([\s\S]는 공백 포함 모든 문자)
+                const match = answer.match(/\[SEARCH_METADATA\]:\s*(\{[\s\S]*?\})/);
+                if (match) {
+                    console.log('[DEBUG] SEARCH_METADATA 패턴 매칭 성공:', match[1]);
+                    const metadata = JSON.parse(match[1]);
+                    console.log('[DEBUG] 파싱된 메타데이터:', metadata);
+                    return metadata;
+                }
+                
+                console.log('[DEBUG] SEARCH_METADATA 패턴 매칭 실패');
+                return {};
+            } catch (e) {
+                console.error('[ERROR] 검색 메타데이터 추출 실패:', e);
+                return {};
+            }
+        }
+        
+        // 이탈률 분석 결과에서 데이터 추출
+        function extractChurnAnalysisData(answer) {
+            try {
+                console.log('[DEBUG] extractChurnAnalysisData 호출, answer 길이:', answer.length);
+                
+                // CHURN_ANALYSIS_RESULT: 접두사로 JSON 데이터 추출
+                const match = answer.match(/CHURN_ANALYSIS_RESULT:\s*(\{[\s\S]*?\})(?:\n|$)/);
+                if (match) {
+                    console.log('[DEBUG] CHURN_ANALYSIS_RESULT 패턴 매칭 성공:', match[1]);
+                    const churnData = JSON.parse(match[1]);
+                    console.log('[DEBUG] 파싱된 이탈률 분석 데이터:', churnData);
+                    return churnData;
+                }
+                
+                console.log('[DEBUG] CHURN_ANALYSIS_RESULT 패턴 매칭 실패');
+                return null;
+            } catch (e) {
+                console.error('[ERROR] 이탈률 분석 데이터 추출 실패:', e);
+                return null;
+            }
+        }
+        
+        // 필터링 실행 함수
+        async function executeFilterAction(endpoint, filterParams) {
+            console.log('executeFilterAction 호출:', endpoint, filterParams);
+            
+            const analysisResultPanel = document.getElementById('analysisResultPanel');
+            
+            // 로딩 표시
+            analysisResultPanel.innerHTML = `
+                <div class="analysis-loading">
+                    <div class="analysis-loading-spinner"></div>
+                    <div class="analysis-loading-text">필터링 중입니다...</div>
+                </div>
+            `;
+            
+            try {
+                // API 파라미터 구성
+                const params = new URLSearchParams({ 
+                    page: 1, 
+                    limit: 100  // 전체 통계를 위해 많이 가져오기
+                });
+                
+                if (filterParams.status) {
+                    params.append('status_filter', filterParams.status);
+                }
+                if (filterParams.type) {
+                    params.append('type_filter', filterParams.type);
+                }
+                
+                const response = await fetch(`${API_BASE_URL}${endpoint}?${params}`);
+                
+                if (!response.ok) {
+                    throw new Error(`API 요청 실패: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('필터링 결과:', data);
+                
+                // 결과 렌더링
+                renderFilterResult(data, filterParams);
+                
+            } catch (error) {
+                console.error('필터링 오류:', error);
+                analysisResultPanel.innerHTML = `
+                    <div class="analysis-loading">
+                        <div class="analysis-loading-text" style="color: #EF4444;">
+                            ⚠️ 필터링 중 오류가 발생했습니다.<br>
+                            ${error.message}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        // 필터링 결과 렌더링
+        function renderFilterResult(data, filterParams) {
+            const analysisResultPanel = document.getElementById('analysisResultPanel');
+            
+            if (!data.success || !data.reports) {
+                analysisResultPanel.innerHTML = `
+                    <div class="analysis-content show">
+                        <div class="analysis-header">
+                            <h2>📋 필터링 결과</h2>
+                        </div>
+                        <div style="padding: 2rem; text-align: center; color: #6B7280;">
+                            데이터를 불러올 수 없습니다.
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            const reports = data.reports;
+            const pagination = data.pagination || {};
+            
+            // 상태명 변환
+            const statusDisplayMap = {
+                'pending': '대기중',
+                'approved': '승인',
+                'rejected': '거부',
+                '': '전체'
+            };
+            
+            const currentStatusDisplay = statusDisplayMap[filterParams.status || ''] || '전체';
+            
+            // 상태별 통계 계산
+            const statusCount = {
+                pending: 0,
+                approved: 0,
+                rejected: 0
+            };
+            
+            reports.forEach(report => {
+                if (statusCount.hasOwnProperty(report.status)) {
+                    statusCount[report.status]++;
+                }
+            });
+            
+            // 타입별 통계
+            const typeCount = {
+                board: reports.filter(r => r.report_type === 'board').length,
+                comment: reports.filter(r => r.report_type === 'comment').length
+            };
+            
+            let html = `
+                <div class="analysis-content show">
+                    <div class="analysis-header">
+                        <h2>📋 신고 필터링 결과</h2>
+                        <div style="font-size: 0.875rem; color: #6B7280; margin-top: 0.5rem;">
+                            필터: ${currentStatusDisplay}
+                        </div>
+                    </div>
+                    
+                    <div style="padding: 1.5rem;">
+                        <!-- 전체 요약 -->
+                        <div style="background: #F9FAFB; border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.5rem;">
+                            <div style="font-weight: 600; font-size: 1.125rem; color: #1F2937; margin-bottom: 1rem;">
+                                📊 통계 요약
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1rem;">
+                                <div style="background: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                    <div style="font-size: 0.875rem; color: #6B7280; margin-bottom: 0.25rem;">필터링된 신고</div>
+                                    <div style="font-size: 1.875rem; font-weight: 700; color: #2563EB;">${reports.length}건</div>
+                                </div>
+                                <div style="background: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                    <div style="font-size: 0.875rem; color: #6B7280; margin-bottom: 0.25rem;">전체 신고</div>
+                                    <div style="font-size: 1.875rem; font-weight: 700; color: #1F2937;">${pagination.total || reports.length}건</div>
+                                </div>
+                            </div>
+                            
+                            <!-- 상태별 분포 -->
+                            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #E5E7EB;">
+                                <div style="font-weight: 600; color: #1F2937; margin-bottom: 0.75rem;">상태별 분포</div>
+                                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem;">
+                                    <div style="text-align: center; padding: 0.75rem; background: #FEF3C7; border-radius: 0.5rem;">
+                                        <div style="font-size: 0.75rem; color: #92400E; margin-bottom: 0.25rem;">대기중</div>
+                                        <div style="font-size: 1.25rem; font-weight: 700; color: #D97706;">${statusCount.pending}건</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 0.75rem; background: #D1FAE5; border-radius: 0.5rem;">
+                                        <div style="font-size: 0.75rem; color: #065F46; margin-bottom: 0.25rem;">승인</div>
+                                        <div style="font-size: 1.25rem; font-weight: 700; color: #10B981;">${statusCount.approved}건</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 0.75rem; background: #FEE2E2; border-radius: 0.5rem;">
+                                        <div style="font-size: 0.75rem; color: #991B1B; margin-bottom: 0.25rem;">거부</div>
+                                        <div style="font-size: 1.25rem; font-weight: 700; color: #EF4444;">${statusCount.rejected}건</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 타입별 분포 -->
+                            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #E5E7EB;">
+                                <div style="font-weight: 600; color: #1F2937; margin-bottom: 0.75rem;">타입별 분포</div>
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;">
+                                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: white; border-radius: 0.5rem;">
+                                        <span style="color: #6B7280; font-size: 0.875rem;">📄 게시글</span>
+                                        <span style="font-weight: 600; color: #1F2937;">${typeCount.board}건</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: white; border-radius: 0.5rem;">
+                                        <span style="color: #6B7280; font-size: 0.875rem;">💬 댓글</span>
+                                        <span style="font-weight: 600; color: #1F2937;">${typeCount.comment}건</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 안내 메시지 -->
+                        <div style="padding: 1rem; background: #EFF6FF; border-left: 4px solid #2563EB; border-radius: 0.5rem;">
+                            <div style="color: #1E40AF; font-size: 0.875rem;">
+                                💡 왼쪽 패널에서 필터링된 신고 목록을 확인하고 직접 처리할 수 있습니다.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            analysisResultPanel.innerHTML = html;
+        }
+
+        // 페이지 이름 매핑
+        function getPageName(url) {
+            const pageNames = {
+                '/churn': '이탈 분석 대시보드',
+                '/ethics_dashboard': '비윤리/스팸 대시보드',
+                '/ethics_analyze': '비윤리/스팸 분석',
+                '/reports': '신고 분류',
+                '/trends': '트렌드 분석'
+            };
+            return pageNames[url] || '상세 페이지';
+        }
+
+        // 대화 초기화
+        async function resetChat() {
+            if (confirm('대화 내역을 모두 삭제하시겠습니까?')) {
+                try {
+                    await fetch(`${API_BASE_URL}/api/agent/session/${sessionId}`, {
+                        method: 'DELETE'
+                    });
+                } catch (error) {
+                    console.error('세션 초기화 실패:', error);
+                }
+
+                sessionId = generateSessionId();
+                disableSplitView();
+
+                const messagesContainer = document.getElementById('chatMessages');
+                messagesContainer.innerHTML = `
+                    <div class="chat-empty">
+                        <div class="chat-empty-icon">💬</div>
+                        <div class="chat-empty-text">
+                            대화가 초기화되었습니다.<br>새로운 질문을 해주세요.
+                        </div>
+                    </div>
+                `;
+                scrollToBottom();
+            }
+        }
+
+        // 스크롤
+        function scrollToBottom() {
+            const messagesContainer = document.getElementById('chatMessages');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    </script>
+</body>
+</html>

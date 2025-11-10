@@ -35,3 +35,18 @@ python-dateutil>=2.8.2
 # 벡터 데이터베이스
 chromadb>=0.4.24
 
+# LangChain & LangGraph (Agent 챗봇)
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+langgraph>=0.0.20
+sentence-transformers>=2.3.0
+FlagEmbedding>=1.2.0
+
+# 한국어 문장 분리 및 BM25 검색
+kss>=4.5.0
+rank-bm25>=0.2.2
+
+# 한국어 형태소 분석 (트렌드 분석용)
+konlpy>=0.6.0
+
