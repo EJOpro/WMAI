@@ -145,7 +145,7 @@ def search_similar_cases(
     embedding: List[float],
     top_k: int = 5,
     min_score: float = 0.5,
-    min_confidence: float = 70.0,
+    min_confidence: float = 80.0,
     prefer_confirmed: bool = True,
     collection_name: str = COLLECTION_NAME
 ) -> List[Dict]:
@@ -157,7 +157,7 @@ def search_similar_cases(
         embedding (List[float]): 검색할 문장의 임베딩 벡터
         top_k (int): 반환할 최대 결과 수 (기본값: 5)
         min_score (float): 최소 유사도 점수 (기본값: 0.5)
-        min_confidence (float): 최소 신뢰도 (기본값: 70.0)
+        min_confidence (float): 최소 신뢰도 (기본값: 80.0)
         prefer_confirmed (bool): 관리자 확인된 케이스 우선 사용 (기본값: True)
         collection_name (str): 컬렉션 이름
         

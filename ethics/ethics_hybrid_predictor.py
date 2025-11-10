@@ -400,13 +400,13 @@ JSON 형식으로만 답변하세요."""
             seen_ids = set()  # 중복 제거용
             
             for embedding in embeddings:
-                # 유사 케이스 검색 (신뢰도 70 이상만)
+                # 유사 케이스 검색 (신뢰도 80 이상만)
                 similar_cases = search_similar_cases(
                     client=self.vector_client,
                     embedding=embedding,
                     top_k=3,  # 문장당 최대 3개
                     min_score=0.5,
-                    min_confidence=70.0,
+                    min_confidence=80.0,
                     prefer_confirmed=True
                 )
                 

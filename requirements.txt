@@ -17,6 +17,7 @@ numpy>=1.21.0
 scikit-learn>=1.0.0
 requests>=2.31.0
 gdown>=4.7.1
+kss>=4.5.0
 
 # 데이터베이스
 pymysql>=1.1.0
