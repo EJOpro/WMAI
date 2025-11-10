@@ -566,11 +566,6 @@
         let filteredPosts = [];
         let searchStartTime = null;
         
-        // 사용자 인증 및 신고 관련
-        let currentUser = null;
-        let isReported = false;
-        let reportedComments = new Set();
-        
         // 카테고리 라벨 매핑
         const categoryLabels = {
             'free': '자유게시판',
@@ -580,26 +575,8 @@
             'tips': '팁/노하우'
         };
 
-        // 사용자 인증 확인
-        async function checkUser() {
-            try {
-                const response = await fetch('/api/auth/me');
-                const data = await response.json();
-                if (data.authenticated) {
-                    currentUser = {
-                        authenticated: true,
-                        ...data.user
-                    };
-                    console.log('[DEBUG] 사용자 인증 완료:', currentUser);
-                }
-            } catch (error) {
-                console.error('[ERROR] 사용자 인증 확인 실패:', error);
-            }
-        }
-        
         // 초기화
-        document.addEventListener('DOMContentLoaded', async function() {
-            await checkUser();
+        document.addEventListener('DOMContentLoaded', function() {
             setupEventListeners();
             
             // 부모 창에 준비 완료 알림
@@ -1045,67 +1022,26 @@
         
         // 게시글 상세 정보 표시 (부모 창에서 호출 - Agent 명령)
         function showPostDetail(data) {
-            console.log('[DEBUG] showPostDetail 호출:', data);
-            console.log('[DEBUG] 현재 filteredPosts:', filteredPosts);
-            console.log('[DEBUG] 현재 allPosts:', allPosts);
-            
             const { post_id, relative_position } = data;
             
             let targetPostId = null;
             
             if (post_id) {
                 targetPostId = post_id;
-                console.log('[DEBUG] post_id로 게시글 선택:', targetPostId);
             } else if (relative_position) {
-                // agent_tools.py와 일치하는 포괄적인 위치 매핑
                 const positions = {
-                    // 영어
                     'first': 0, 'second': 1, 'third': 2, 'fourth': 3, 'fifth': 4,
-                    'sixth': 5, 'seventh': 6, 'eighth': 7, 'ninth': 8, 'tenth': 9,
-                    
-                    // 한국어 - 기본형
-                    '첫번째': 0, '첫째': 0, '1번째': 0,
-                    '두번째': 1, '둘째': 1, '2번째': 1,
-                    '세번째': 2, '셋째': 2, '3번째': 2,
-                    '네번째': 3, '넷째': 3, '4번째': 3,
-                    '다섯번째': 4, '다섯째': 4, '5번째': 4,
-                    '여섯번째': 5, '여섯째': 5, '6번째': 5,
-                    '일곱번째': 6, '일곱째': 6, '7번째': 6,
-                    '여덟번째': 7, '여덟째': 7, '8번째': 7,
-                    '아홉번째': 8, '아홉째': 8, '9번째': 8,
-                    '열번째': 9, '열째': 9, '10번째': 9,
-                    
-                    // 한국어 - 축약형
-                    '첫': 0, '두': 1, '세': 2, '네': 3, '다섯': 4,
-                    '여섯': 5, '일곱': 6, '여덟': 7, '아홉': 8, '열': 9
+                    '첫': 0, '첫번째': 0, '두': 1, '두번째': 1, '세': 2, '세번째': 2,
+                    '네': 3, '네번째': 3, '다섯': 4, '다섯번째': 4
                 };
-                
                 const index = positions[relative_position.toLowerCase()];
-                console.log('[DEBUG] relative_position:', relative_position, 'index:', index);
-                console.log('[DEBUG] filteredPosts.length:', filteredPosts.length);
-                console.log('[DEBUG] allPosts.length:', allPosts.length);
-                
-                // filteredPosts가 비어있으면 allPosts 사용
-                const postsToUse = filteredPosts.length > 0 ? filteredPosts : allPosts;
-                console.log('[DEBUG] 사용할 posts:', postsToUse.length, '개');
-                
-                if (index !== undefined && index < postsToUse.length) {
-                    targetPostId = postsToUse[index].id;
-                    console.log('[DEBUG] relative_position으로 게시글 선택:', targetPostId, '(index:', index, ')');
-                } else if (index !== undefined) {
-                    console.warn('[WARN] 인덱스가 범위를 벗어남:', index, '>=', postsToUse.length);
-                    alert(`${relative_position} 게시글이 없습니다. (총 ${postsToUse.length}개 게시글)`);
-                } else {
-                    console.warn('[WARN] 알 수 없는 relative_position:', relative_position);
-                    alert(`"${relative_position}"는 인식할 수 없는 위치입니다.`);
+                if (index !== undefined && index < filteredPosts.length) {
+                    targetPostId = filteredPosts[index].id;
                 }
             }
             
             if (targetPostId) {
-                console.log('[DEBUG] openPostDetail 호출:', targetPostId);
                 openPostDetail(targetPostId);
-            } else {
-                console.error('[ERROR] targetPostId를 찾을 수 없음');
             }
         }
         

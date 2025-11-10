@@ -1282,9 +1282,19 @@ ${JSON.stringify(data, null, 2)}
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
 
+            // 메타데이터 제거 (사용자에게 보이지 않도록)
+            let displayContent = content;
+            if (type === 'bot') {
+                // 메타데이터 태그 제거
+                displayContent = displayContent.replace(/\n*\[BOARD_IDS\]:\s*\[.*?\]/g, '');
+                displayContent = displayContent.replace(/\n*\[SEARCH_QUERY\]:\s*.+/g, '');
+                displayContent = displayContent.replace(/\n*\[SEARCH_METADATA\]:\s*\{[\s\S]*?\}/g, '');
+                displayContent = displayContent.trim();
+            }
+
             let messageHTML = `
                 <div class="message-bubble">
-                    <div class="message-content">${escapeHtml(content)}</div>
+                    <div class="message-content">${escapeHtml(displayContent)}</div>
             `;
 
             if (toolBadge) {

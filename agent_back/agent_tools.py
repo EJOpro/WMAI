@@ -90,20 +90,39 @@ def get_ensemble_retriever():
 class CustomEnsembleRetriever:
     """
     BM25와 Vector 검색을 결합하는 커스텀 앙상블 검색기
+    선택적으로 BGE Reranker를 사용하여 검색 결과를 재순위화합니다.
     """
     
-    def __init__(self, bm25_weight: float = 0.5, vector_weight: float = 0.5):
+    def __init__(
+        self, 
+        bm25_weight: float = 0.5, 
+        vector_weight: float = 0.5,
+        use_rerank: bool = True
+    ):
         """
         Args:
             bm25_weight: BM25 검색 결과 가중치
             vector_weight: Vector 검색 결과 가중치
+            use_rerank: Reranker 사용 여부 (기본값: True)
         """
         self.bm25_weight = bm25_weight
         self.vector_weight = vector_weight
+        self.use_rerank = use_rerank
+        self.reranker = None
+        
+        # Reranker 초기화
+        if use_rerank:
+            try:
+                from agent_back.reranker import get_reranker
+                self.reranker = get_reranker()
+                print(f"[OK] CustomEnsembleRetriever with Reranker 초기화 완료")
+            except Exception as e:
+                print(f"[WARN] Reranker 초기화 실패, Rerank 없이 진행: {e}")
+                self.use_rerank = False
     
     def get_relevant_documents(self, query: str, k: int = 10):
         """
-        앙상블 검색 수행
+        앙상블 검색 수행 (BM25 + Vector + 선택적 Reranking)
         
         Args:
             query: 검색 쿼리
@@ -113,13 +132,16 @@ class CustomEnsembleRetriever:
             관련 Document 리스트
         """
         try:
+            # Rerank 사용 시 더 많은 후보를 가져옴 (k*3), 그렇지 않으면 k*2
+            candidate_multiplier = 3 if self.use_rerank else 2
+            
             # BM25 검색
             bm25_store = get_bm25_store()
-            bm25_results = bm25_store.search(query, k=k*2)  # 더 많이 가져와서 다양성 확보
+            bm25_results = bm25_store.search(query, k=k*candidate_multiplier)
             
             # Vector 검색
             vectorstore = get_vectorstore()
-            vector_results = vectorstore.similarity_search_with_score(query, k=k*2)
+            vector_results = vectorstore.similarity_search_with_score(query, k=k*candidate_multiplier)
             
             # 결과 통합 및 중복 제거
             combined_docs = {}
@@ -158,7 +180,24 @@ class CustomEnsembleRetriever:
             # 점수 내림차순 정렬
             final_results.sort(key=lambda x: x[1], reverse=True)
             
-            # 상위 k개 반환
+            # Reranking 적용 (활성화된 경우)
+            if self.use_rerank and self.reranker:
+                try:
+                    # 앙상블 결과 상위 k*2개를 Reranker에 전달
+                    candidates = [doc for doc, score in final_results[:k*2]]
+                    
+                    if candidates:
+                        # Reranker로 재순위화
+                        reranked_results = self.reranker.rerank(query, candidates, top_k=k)
+                        # Reranked 문서만 반환 (rerank 점수는 제외)
+                        return [doc for doc, score in reranked_results]
+                        
+                except Exception as rerank_error:
+                    print(f"[WARN] Reranking 실패, 앙상블 결과 사용: {rerank_error}")
+                    # Reranking 실패 시 앙상블 결과 반환
+                    return [doc for doc, score in final_results[:k]]
+            
+            # Rerank 미사용 시 앙상블 결과 반환
             return [doc for doc, score in final_results[:k]]
             
         except Exception as e:
@@ -217,18 +256,25 @@ def semantic_search_tool(query: str) -> str:
                     comment_ids.append(doc_id)
                     comment_results.append(doc)
         
+        # Rerank 사용 여부 확인
+        ensemble_retriever = get_ensemble_retriever()
+        use_rerank = getattr(ensemble_retriever, 'use_rerank', False)
+        
         # 검색 메타데이터 생성
+        search_method = 'BM25+Vector+Rerank 앙상블' if use_rerank else 'BM25+Vector 앙상블'
         search_metadata = {
-            'search_method': 'BM25+Vector 앙상블',
+            'search_method': search_method,
             'total_results': len(results),
             'board_count': len(board_results),
             'comment_count': len(comment_results),
             'board_ids': board_ids,
-            'comment_ids': comment_ids
+            'comment_ids': comment_ids,
+            'use_rerank': use_rerank
         }
         
         # 결과 포맷팅
-        output = [f"'{query}'에 대한 앙상블 검색 결과 {len(results)}건 (게시글 {len(board_results)}개, 댓글 {len(comment_results)}개):\n"]
+        search_method_text = "Rerank 앙상블" if use_rerank else "앙상블"
+        output = [f"'{query}'에 대한 {search_method_text} 검색 결과 {len(results)}건 (게시글 {len(board_results)}개, 댓글 {len(comment_results)}개):\n"]
         
         # 전체 결과 표시 (게시글 + 댓글)
         for idx, doc in enumerate(results, 1):
@@ -254,8 +300,9 @@ def semantic_search_tool(query: str) -> str:
             # 유사도 점수 계산 (순서 기반)
             similarity_score = max(0, 100 - (idx * 5))
             
+            search_badge = "BM25+Vector+Rerank" if use_rerank else "BM25+Vector"
             output.append(f"\n[{idx}] {type_text} - {title}{chunk_info}")
-            output.append(f"작성자: {author} | 날짜: {date} | 유사도: {similarity_score}% | 검색: BM25+Vector 앙상블")
+            output.append(f"작성자: {author} | 날짜: {date} | 유사도: {similarity_score}% | 검색: {search_badge} 앙상블")
             output.append(f"내용: {doc.page_content[:100]}...")
             output.append("-" * 50)
         

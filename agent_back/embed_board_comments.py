@@ -217,6 +217,48 @@ def embed_and_store(documents):
             print(f"  {idx}. [{doc_type}] {title}{chunk_info} (점수: {score:.3f})")
             print(f"     내용: {doc.page_content[:50]}...")
         
+        # Rerank 테스트 추가
+        try:
+            print("\n[테스트] BGE Reranker 성능 비교:")
+            print("="*60)
+            from agent_back.reranker import BGEReranker
+            
+            reranker = BGEReranker()
+            test_query = "육아"
+            
+            # Vector 검색으로 후보 10개 가져오기
+            candidates = vectorstore.similarity_search(test_query, k=10)
+            
+            print(f"\n[Before Rerank] Vector 검색 결과 (상위 5개):")
+            for idx, doc in enumerate(candidates[:5], 1):
+                doc_type = "게시글" if doc.metadata['type'] == 'board' else "댓글"
+                title = doc.metadata.get('title', doc.metadata.get('board_title', '제목 없음'))
+                chunk_info = f" (청크 {doc.metadata.get('chunk_index', 0)+1}/{doc.metadata.get('chunk_count', 1)})" if doc.metadata.get('chunk_count', 1) > 1 else ""
+                print(f"  {idx}. [{doc_type}] {title}{chunk_info}")
+                print(f"     내용: {doc.page_content[:80]}...")
+            
+            # Rerank 적용
+            reranked = reranker.rerank(test_query, candidates, top_k=5)
+            
+            print(f"\n[After Rerank] Rerank 적용 결과 (상위 5개):")
+            for idx, (doc, rerank_score) in enumerate(reranked, 1):
+                doc_type = "게시글" if doc.metadata['type'] == 'board' else "댓글"
+                title = doc.metadata.get('title', doc.metadata.get('board_title', '제목 없음'))
+                chunk_info = f" (청크 {doc.metadata.get('chunk_index', 0)+1}/{doc.metadata.get('chunk_count', 1)})" if doc.metadata.get('chunk_count', 1) > 1 else ""
+                print(f"  {idx}. [{doc_type}] {title}{chunk_info} (Rerank 점수: {rerank_score:.4f})")
+                print(f"     내용: {doc.page_content[:80]}...")
+            
+            print("\n" + "="*60)
+            print("[OK] Reranker 테스트 완료!")
+            print("="*60)
+            print("💡 Reranker는 쿼리와 문서의 직접적인 관련성을 평가하여")
+            print("   검색 결과의 순서를 최적화합니다.")
+            print("   실제 검색 시에는 자동으로 Rerank가 적용됩니다.")
+            
+        except Exception as rerank_error:
+            print(f"\n[WARN] Reranker 테스트 중 오류 발생: {rerank_error}")
+            print("Reranker는 선택적 기능이므로 기본 검색은 정상 작동합니다.")
+        
         return vectorstore
         
     except Exception as e:
