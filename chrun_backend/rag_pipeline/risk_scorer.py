@@ -3,12 +3,12 @@
 각 문장에 대해 이탈 위험 점수를 계산하고, 고위험 문장을 벡터 DB에 저장하는 기능을 제공합니다.
 """
 
-import random
 import os
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
 # 환경 변수 로드
 load_dotenv()
@@ -29,8 +29,39 @@ except ImportError:
     print("[WARN] openai 패키지가 설치되지 않았습니다. pip install openai 를 실행해주세요.")
     openai = None
 
+class RiskThresholdSettings(BaseSettings):
+    rag_risk_threshold: Optional[float] = None
+    risk_threshold: float = 0.75
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+        extra = "allow"
+
+
+def _resolve_threshold() -> float:
+    env_candidates = [
+        os.getenv("RAG_THRESHOLD"),
+        os.getenv("RAG_RISK_THRESHOLD"),
+        os.getenv("RISK_THRESHOLD"),
+    ]
+    for value in env_candidates:
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except ValueError:
+            continue
+
+    settings = RiskThresholdSettings()
+    if settings.rag_risk_threshold is not None:
+        return float(settings.rag_risk_threshold)
+    return float(settings.risk_threshold)
+
+
 # 고위험 문장 판단 임계값
-THRESHOLD = 0.75
+THRESHOLD = _resolve_threshold()
+_THRESHOLD_LOGGED = False
 
 
 class RiskScorer:
@@ -39,21 +70,54 @@ class RiskScorer:
     """
     
     def __init__(self):
+        global _THRESHOLD_LOGGED
+        if not _THRESHOLD_LOGGED:
+            print(f"[INFO] RiskScorer THRESHOLD 적용: {THRESHOLD:.2f}")
+            _THRESHOLD_LOGGED = True
+
         # 위험 키워드 패턴들 (추후 확장 가능)
-        self.risk_keywords = {
-            'high_risk': [
-                '그만둘', '포기', '떠날', '나갈', '싫어', '짜증', '화나', '실망',
-                '의미없', '소용없', '헛된', '시간낭비', '별로', '최악'
-            ],
-            'medium_risk': [
-                '어려워', '힘들어', '복잡해', '모르겠', '이해안돼', '답답해',
-                '지쳐', '피곤해', '귀찮아', '번거로워'
-            ],
-            'low_risk': [
-                '괜찮', '좋아', '재미있', '흥미로', '도움', '유용해',
-                '만족', '행복', '즐거워', '기대돼'
-            ]
-        }
+        # | 구분        | 가중치 | 예시 키워드(확장됨)                                   |
+        # | HIGH       | +0.45  | 탈퇴, 그만둘, 최악, 꺼져, 지옥, 환멸                  |
+        # | ABUSIVE    | +0.35  | 개같, 병신, 미친놈, 죽어, 엿같, 빡치                  |
+        # | MEDIUM     | +0.25  | 힘들어, 답답해, 포기할까, 다른 곳, 불편               |
+        # | LOW(완충)  | -0.20  | 만족, 고마워, 기대, 재밌, 추천, 도움                 |
+        self.keyword_profiles = [
+            {
+                "level": "HIGH",
+                "weight": 0.45,
+                "keywords": [
+                    '그만둘', '포기', '떠날', '나갈', '싫어', '짜증', '화나', '실망',
+                    '의미없', '소용없', '헛된', '시간낭비', '별로', '최악', '탈퇴', '접을까',
+                    '환멸', '지옥', '불매', '못해먹'
+                ],
+            },
+            {
+                "level": "ABUSIVE",
+                "weight": 0.35,
+                "keywords": [
+                    '꺼져', '죽어', '미친놈', '미친년', '개같', '병신', '씨발', '좆같',
+                    '빡치', '지랄', '엿같', '돌아이', '쓰레기', '멍청이', '도랏', '개빡치'
+                ],
+            },
+            {
+                "level": "MEDIUM",
+                "weight": 0.25,
+                "keywords": [
+                    '어려워', '힘들어', '복잡해', '모르겠', '이해안돼', '답답해',
+                    '지쳐', '피곤해', '귀찮아', '번거로워', '짜증나', '열받', '다른 서비스',
+                    '대안', '포기할까', '갈아탈', '마음이 떠났'
+                ],
+            },
+            {
+                "level": "LOW",
+                "weight": -0.2,
+                "keywords": [
+                    '괜찮', '좋아', '재미있', '흥미로', '도움', '유용해',
+                    '만족', '행복', '즐거워', '기대돼', '감사', '추천', '고맙', '사랑',
+                    '기쁨', '뿌듯', '든든'
+                ],
+            },
+        ]
         
     def score_sentences(
         self, 
@@ -90,15 +154,10 @@ class RiskScorer:
             
             # 실제 LLM을 사용한 위험 점수 계산
             # 이 부분은 실제 LLM 호출이며, 운영 시 비용이 든다
-            risk_score = self._call_llm_for_risk_analysis(sentence)
-            
-            # 위험 레벨 결정 (THRESHOLD 기준 적용)
-            if risk_score >= THRESHOLD:
-                risk_level = 'high'
-            elif risk_score >= 0.4:
-                risk_level = 'medium'
-            else:
-                risk_level = 'low'
+            analysis = self.score_sentence(sentence)
+            risk_score = analysis["risk_score"]
+            risk_level = analysis["risk_level"]
+            reasons = analysis["reasons"]
             
             # 고위험 문장 판단
             is_high_risk = risk_score >= THRESHOLD
@@ -109,7 +168,9 @@ class RiskScorer:
                 'risk_score': risk_score,
                 'risk_level': risk_level,
                 'analyzed_at': datetime.now(),
-                'is_high_risk': is_high_risk
+                'is_high_risk': is_high_risk,
+                'risk_factors': reasons,
+                'reason': "; ".join(reasons)
             })
             
             scored_sentences.append(scored_data)
@@ -135,6 +196,43 @@ class RiskScorer:
             "high_risk_candidates": high_risk_candidates
         }
     
+    def score_sentence(self, sentence: str) -> Dict[str, Any]:
+        """
+        단일 문장의 위험 점수와 근거를 계산합니다.
+        """
+        keyword_score, keyword_level, keyword_reasons = self._calculate_risk_score(sentence)
+        llm_score = self._call_llm_for_risk_analysis(sentence)
+
+        weighted_scores: List[Tuple[float, float]] = []
+        if keyword_score > 0:
+            weighted_scores.append((keyword_score, 0.6))
+        if llm_score > 0:
+            weight = 0.4 if keyword_score > 0 else 1.0
+            weighted_scores.append((llm_score, weight))
+
+        if weighted_scores:
+            final_score = sum(score * weight for score, weight in weighted_scores) / sum(weight for _, weight in weighted_scores)
+        else:
+            final_score = keyword_score  # 0 또는 음수 포함
+
+        final_score = max(0.0, min(1.0, final_score))
+        final_level = self._score_to_level(final_score)
+
+        reasons = list(dict.fromkeys(keyword_reasons))  # 중복 제거 유지 순서
+        if llm_score > 0:
+            reasons.append(f"LLM_평가:{llm_score:.2f}")
+
+        if not reasons:
+            reasons.append("명확한 위험 신호 없음")
+
+        return {
+            "risk_score": final_score,
+            "risk_level": final_level,
+            "reasons": reasons,
+            "keyword_score": keyword_score,
+            "llm_score": llm_score,
+        }
+
     def _calculate_risk_score(self, sentence: str) -> tuple[float, str, List[str]]:
         """
         단일 문장에 대한 위험 점수 계산
@@ -151,49 +249,29 @@ class RiskScorer:
         sentence_lower = sentence.lower()
         risk_factors = []
         base_score = 0.0
-        
-        # TODO: 실제 LLM 호출로 대체 예정
-        # 현재는 키워드 기반 간단한 점수 계산
-        
-        # 고위험 키워드 체크
-        high_risk_count = 0
-        for keyword in self.risk_keywords['high_risk']:
-            if keyword in sentence_lower:
-                high_risk_count += 1
-                risk_factors.append(f"고위험_키워드: {keyword}")
-                
-        # 중위험 키워드 체크  
-        medium_risk_count = 0
-        for keyword in self.risk_keywords['medium_risk']:
-            if keyword in sentence_lower:
-                medium_risk_count += 1
-                risk_factors.append(f"중위험_키워드: {keyword}")
-                
-        # 저위험(긍정) 키워드 체크
-        low_risk_count = 0
-        for keyword in self.risk_keywords['low_risk']:
-            if keyword in sentence_lower:
-                low_risk_count += 1
-                risk_factors.append(f"긍정_키워드: {keyword}")
-        
-        # 점수 계산 로직
-        base_score = (high_risk_count * 0.4) + (medium_risk_count * 0.2) - (low_risk_count * 0.1)
+
+        for profile in self.keyword_profiles:
+            matches = [kw for kw in profile["keywords"] if kw in sentence_lower]
+            if not matches:
+                continue
+
+            delta = profile["weight"] * len(matches)
+            base_score += delta
+
+            label = profile["level"]
+            if profile["weight"] > 0:
+                risk_factors.extend([f"{label}_키워드:{kw}" for kw in matches])
+            else:
+                risk_factors.extend([f"완충_키워드:{kw}" for kw in matches])
         
         # 문장 길이 고려 (너무 짧거나 긴 문장은 점수 조정)
         sentence_length = len(sentence.strip())
         if sentence_length < 10:
             base_score *= 0.5  # 짧은 문장은 점수 감소
-        elif sentence_length > 100:
-            base_score *= 1.2  # 긴 문장은 점수 증가
+        elif sentence_length > 120:
+            base_score *= 1.1  # 지나치게 긴 문장은 약간 증가
             
-        # TODO: 여기에 실제 LLM API 호출 로직 추가 예정
-        # 예시:
-        # llm_score = await self._call_llm_for_risk_analysis(sentence)
-        # base_score = (base_score + llm_score) / 2
-        
-        # 임시로 약간의 랜덤성 추가 (실제 LLM 결과 시뮬레이션)
-        random_factor = random.uniform(-0.1, 0.1)
-        final_score = max(0.0, min(1.0, base_score + random_factor))
+        final_score = max(0.0, min(1.0, base_score))
         
         # 위험 레벨 결정 (THRESHOLD 기준 적용)
         if final_score >= THRESHOLD:
@@ -204,6 +282,14 @@ class RiskScorer:
             risk_level = 'low'
             
         return final_score, risk_level, risk_factors
+
+    @staticmethod
+    def _score_to_level(score: float) -> str:
+        if score >= THRESHOLD:
+            return 'high'
+        if score >= 0.4:
+            return 'medium'
+        return 'low'
     
     def _store_high_risk_sentences(self, high_risk_sentences: List[Dict[str, Any]]) -> None:
         """

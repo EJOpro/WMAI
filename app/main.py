@@ -9,11 +9,25 @@ FastAPI 메인 서버
 
 import sys
 import io
+import logging
 
 # Windows에서 UTF-8 출력 설정
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True)
+
+# 로깅 설정 (RAG 파이프라인 상세 로그 출력)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True  # 기존 설정 덮어쓰기
+)
+
+# RAG 파이프라인 로그를 더 상세하게 출력
+logging.getLogger('chrun_backend.rag_pipeline').setLevel(logging.DEBUG)
+logging.getLogger('chrun_backend.rag_pipeline.rag_checker').setLevel(logging.INFO)
+logging.getLogger('chrun_backend.rag_pipeline.rag_decider').setLevel(logging.INFO)
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles

@@ -9,8 +9,32 @@
 
 {% block content %}
 <div class="page-header">
-    <h1>이탈자 분석 시스템</h1>
-    <p>사용자 이탈률 및 세그먼트 분석 대시보드</p>
+    <div class="d-flex justify-content-between align-items-center">
+        <div>
+            <h1>이탈자 분석 시스템</h1>
+            <p class="mb-0">사용자 이탈률 및 세그먼트 분석 대시보드</p>
+        </div>
+    </div>
+    <!-- 분석 설정 정보 헤더 -->
+    <div class="analysis-header-info mt-3" id="analysisHeaderInfo" style="display: none;">
+        <div class="d-flex flex-wrap gap-3 align-items-center">
+            <div class="info-item">
+                <i class="fas fa-calendar-alt"></i>
+                <span class="label">분석 기간:</span>
+                <span class="value" id="headerPeriod">-</span>
+            </div>
+            <div class="info-item">
+                <i class="fas fa-filter"></i>
+                <span class="label">임계값:</span>
+                <span class="value" id="headerThreshold">-</span>
+            </div>
+            <div class="info-item">
+                <i class="fas fa-users"></i>
+                <span class="label">선택 세그먼트:</span>
+                <span class="value" id="headerSegments">없음</span>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="churn-dashboard">
@@ -44,12 +68,8 @@
                         </div>
                         <div class="card-body">
                             <div class="form-row">
-                                <label class="form-label">시작월:</label>
-                                <input type="month" class="form-control" id="startMonth" value="2025-08">
-                            </div>
-                            <div class="form-row">
-                                <label class="form-label">종료월:</label>
-                                <input type="month" class="form-control" id="endMonth" value="2025-10">
+                                <label class="form-label">분석 월:</label>
+                                <input type="month" class="form-control" id="analysisMonth" value="2025-10">
                             </div>
                         </div>
                     </div>
@@ -155,11 +175,21 @@
                         </div>
 
                         <!-- 분석 결과 카드 (분석 후에만 표시) -->
-                        <div class="stats-grid" id="metricsRow" style="display: none;">
+                        <div id="metricsRow" style="display: none;">
+                            <div class="stats-grid">
                             <div>
-                                <div class="card text-center metric-card">
+                                <div class="card text-center metric-card" tabindex="0" role="button" aria-label="이탈률 카드">
                                     <div class="card-body">
-                                        <h6 class="card-subtitle mb-2 text-muted" id="churnCardTitle">Churn (Last: - vs -)</h6>
+                                        <h6 class="card-subtitle mb-2 text-muted">
+                                            <span id="churnCardTitle">이탈률</span>
+                                            <i class="fas fa-info-circle text-muted ml-1 tooltip-trigger" 
+                                               data-toggle="tooltip" 
+                                               data-placement="top"
+                                               aria-label="이탈률 계산 공식"
+                                               tabindex="0"
+                                               role="button"
+                                               id="churnFormulaTooltip"></i>
+                                        </h6>
                                         <h2 class="card-title text-danger" id="churnRate">-</h2>
                                         <p class="card-text">
                                             <span class="badge" id="churnSeverity">분석필요</span><br>
@@ -169,19 +199,19 @@
                                 </div>
                             </div>
                             <div>
-                                <div class="card text-center metric-card">
+                                <div class="card text-center metric-card" tabindex="0" role="button" aria-label="활성 사용자 카드">
                                     <div class="card-body">
-                                        <h6 class="card-subtitle mb-2 text-muted">활성 사용자</h6>
+                                        <h6 class="card-subtitle mb-2 text-muted"><span id="activeUsersCardTitle">활성 사용자</span></h6>
                                         <h2 class="card-title text-primary" id="activeUsers">-</h2>
                                         <p class="card-text">
                                             <span class="badge" id="userTrend">분석필요</span><br>
-                                            <small class="muted">증감률 <strong id="userGrowthRate">-</strong></small>
+                                            <small class="muted" id="activeUsersSubtext">증감률 <strong id="userGrowthRate">-</strong></small>
                                         </p>
                                     </div>
                                 </div>
                             </div>
                             <div>
-                                <div class="card text-center metric-card">
+                                <div class="card text-center metric-card" tabindex="0" role="button" aria-label="재활성 사용자 카드">
                                     <div class="card-body">
                                         <h6 class="card-subtitle mb-2 text-muted">재활성 사용자</h6>
                                         <h2 class="card-title text-success" id="reactivatedUsers">-</h2>
@@ -193,9 +223,18 @@
                                 </div>
                             </div>
                             <div>
-                                <div class="card text-center metric-card">
+                                <div class="card text-center metric-card" tabindex="0" role="button" aria-label="장기 미접속 카드">
                                     <div class="card-body">
-                                        <h6 class="card-subtitle mb-2 text-muted">장기 미접속</h6>
+                                        <h6 class="card-subtitle mb-2 text-muted">
+                                            장기 미접속
+                                            <i class="fas fa-info-circle text-muted ml-1 tooltip-trigger" 
+                                               data-toggle="tooltip" 
+                                               data-placement="top"
+                                               aria-label="장기 미접속 임계값 정보"
+                                               tabindex="0"
+                                               role="button"
+                                               id="inactiveThresholdTooltip"></i>
+                                        </h6>
                                         <h2 class="card-title text-warning" id="longTermInactive">-</h2>
                                         <p class="card-text">
                                             <span class="badge" id="riskLevel">분석필요</span><br>
@@ -203,6 +242,7 @@
                                         </p>
                                     </div>
                                 </div>
+                            </div>
                             </div>
                         </div>
 

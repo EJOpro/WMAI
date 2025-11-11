@@ -78,8 +78,13 @@ class ChurnAnalyzer:
         start_time = datetime.now()
         
         try:
-            # 1. 기본 지표 계산
-            metrics = self.get_monthly_metrics(end_month, threshold)
+            # 1. 기본 지표 계산 (마지막 월 전환: m-1 → m)
+            monthly_metrics = self.get_monthly_metrics(end_month, threshold)
+            
+            # metrics에 병합
+            metrics = {
+                **monthly_metrics
+            }
             
             # 2. 월별 트렌드
             months = self._generate_month_range(start_month, end_month)
@@ -200,7 +205,13 @@ class ChurnAnalyzer:
             }
     
     def get_monthly_metrics(self, month: str, threshold: int = 1) -> Dict:
-        """월별 주요 지표 계산"""
+        """월별 주요 지표 계산 (단일 월 전환: m-1 → m)
+        
+        규칙:
+        - 사용자 기준 1회 집계: 동일 user_hash는 채널(web/app)과 무관하게 1회만 집계
+        - web/app 이중 사용자도 user_hash 기준으로 고유화되어 중복 집계 방지
+        - 채널별 분할 리포트는 제공하지 않음 (전체 이탈률만 계산)
+        """
         
         current_month = month
         previous_month = self._get_previous_month(month)
@@ -208,6 +219,8 @@ class ChurnAnalyzer:
         month_trunc = self._get_month_trunc('created_at')
         
         # SQL 쿼리로 효율적인 계산
+        # monthly_users CTE: user_hash 기준으로 고유화 (채널 무관)
+        # GROUP BY {month_trunc}, user_hash로 동일 사용자의 web/app 이중 사용 방지
         query = text(f"""
         WITH monthly_users AS (
             SELECT 
@@ -269,12 +282,84 @@ class ChurnAnalyzer:
         churned = to_int(result.churned_users)
         retained = to_int(result.retained_users)
         
-        # 이탈률 계산
+        # 사용자 기준 1회 집계 검증 로그
+        # 중복 제거 확인: 동일 user_hash는 채널(web/app)과 무관하게 1회만 집계됨
+        verification_query = text(f"""
+        SELECT 
+            COUNT(*) as total_events,
+            COUNT(DISTINCT user_hash) as unique_users,
+            COUNT(DISTINCT CASE WHEN channel = 'web' THEN user_hash END) as web_users,
+            COUNT(DISTINCT CASE WHEN channel = 'app' THEN user_hash END) as app_users,
+            COUNT(DISTINCT CASE WHEN channel IN ('web', 'app') THEN user_hash END) as web_or_app_users
+        FROM events
+        WHERE {month_trunc} IN (:prev_month, :curr_month)
+        """)
+        
+        verification_result = self.db.execute(verification_query, {
+            "prev_month": previous_month,
+            "curr_month": current_month
+        }).fetchone()
+        
+        if verification_result:
+            total_events = to_int(verification_result.total_events)
+            unique_users = to_int(verification_result.unique_users)
+            web_users = to_int(verification_result.web_users or 0)
+            app_users = to_int(verification_result.app_users or 0)
+            web_or_app_users = to_int(verification_result.web_or_app_users or 0)
+            
+            print(f"\n[집계 검증] {previous_month} → {current_month}")
+            print(f"  - 전체 이벤트 수: {total_events}")
+            print(f"  - 고유 사용자 수 (user_hash 기준): {unique_users}")
+            print(f"  - Web 사용자 수: {web_users}")
+            print(f"  - App 사용자 수: {app_users}")
+            print(f"  - Web 또는 App 사용자 수: {web_or_app_users}")
+            print(f"  - 이전 월 활성 사용자: {previous_active}명 (중복 제거 후)")
+            print(f"  - 현재 월 활성 사용자: {current_active}명 (중복 제거 후)")
+            print(f"  - 이탈 사용자: {churned}명")
+            print(f"  - 유지 사용자: {retained}명")
+            if unique_users > 0:
+                print(f"  - 중복 제거 확인: {unique_users}명 기준으로 집계됨 (채널 무관)")
+        
+        # 이탈률 계산 (분모=0 방지: previous_active가 0이면 0 반환)
         churn_rate = (churned / previous_active * 100) if previous_active > 0 else 0
         retention_rate = (retained / previous_active * 100) if previous_active > 0 else 0
         
-        # 재활성 사용자 계산
-        reactivated_users = self._calculate_reactivated_users(current_month)
+        # 재활성 사용자 계산 (이전 월에는 없었지만 현재 월에 있는 사용자)
+        # 현재 월 활성 사용자 중 이전 월 활성 사용자가 아닌 사용자
+        reactivated_query = text(f"""
+        WITH monthly_users AS (
+            SELECT 
+                {month_trunc} as month,
+                user_hash,
+                COUNT(*) as event_count
+            FROM events 
+            WHERE {month_trunc} IN (:prev_month, :curr_month)
+            GROUP BY {month_trunc}, user_hash
+            HAVING COUNT(*) >= :threshold
+        ),
+        current_month_active AS (
+            SELECT DISTINCT user_hash
+            FROM monthly_users
+            WHERE month = :curr_month
+        ),
+        previous_month_active AS (
+            SELECT DISTINCT user_hash
+            FROM monthly_users
+            WHERE month = :prev_month
+        )
+        SELECT COUNT(*) as reactivated_count
+        FROM current_month_active cma
+        LEFT JOIN previous_month_active pma ON cma.user_hash = pma.user_hash
+        WHERE pma.user_hash IS NULL
+        """)
+        
+        reactivated_result = self.db.execute(reactivated_query, {
+            "curr_month": current_month,
+            "prev_month": previous_month,
+            "threshold": threshold
+        }).fetchone()
+        
+        reactivated_users = to_int(reactivated_result.reactivated_count if reactivated_result else 0)
         
         # 장기 미접속 사용자 계산
         long_term_inactive = self._calculate_long_term_inactive(current_month, 90)
@@ -293,6 +378,321 @@ class ChurnAnalyzer:
                 "active_users": current_active - previous_active,
                 "churn_rate_change": churn_rate  # 이전 달과의 차이는 별도 계산 필요
             }
+        }
+    
+    def get_range_metrics(self, start_month: str, end_month: str, threshold: int = 1, 
+                          start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+        """기간 전체의 모든 월 전환을 합산한 범위 지표 계산
+        
+        range_churn = Σ(churned_m) / Σ(active_{m-1})  (범위 내 포함되는 월 전환 m-1→m 합산)
+        
+        규칙:
+        - 분모=0 방지: Σ(active_{m-1}) = 0이면 range_churn = 0 반환
+        - monthly[]: 각 월별 지표 배열
+        - range_*: 기간 전체 합산 지표
+        - boundary_mode: 경계 처리 방식 ("month_transitions_only": 전환만 포함)
+        
+        Args:
+            start_month: 시작 월 (YYYY-MM)
+            end_month: 종료 월 (YYYY-MM)
+            threshold: 최소 이벤트 수
+            start_date: 시작일 (YYYY-MM-DD, 선택적, 있으면 경계 처리에 사용)
+            end_date: 종료일 (YYYY-MM-DD, 선택적, 있으면 경계 처리에 사용)
+        """
+        
+        # 범위 내 포함되는 전환 목록 산출
+        if start_date and end_date:
+            transition_info = self._enumerate_in_range_transitions(start_date, end_date)
+            included_transitions = transition_info["transitions"]
+            boundary_mode = transition_info["boundary_mode"]
+        else:
+            # 날짜가 없으면 월 범위로 전환 목록 생성
+            months = self._generate_month_range(start_month, end_month)
+            included_transitions = [
+                {"prev": months[i-1], "curr": months[i]}
+                for i in range(1, len(months))
+            ]
+            boundary_mode = "month_transitions_only"
+        
+        if len(included_transitions) == 0:
+            # 최소 2개월이 필요 (전환이 발생하려면)
+            return {
+                "range_churn_rate": 0,
+                "range_active_users": 0,
+                "range_previous_active_users": 0,
+                "range_churned_users": 0,
+                "range_retained_users": 0,
+                "range_reactivated_users": 0,
+                "range_long_term_inactive": 0,
+                "monthly": [],
+                "boundary_mode": boundary_mode,
+                "included_transitions": []
+            }
+        
+        # 포함되는 전환 쌍을 SQL 조건으로 변환
+        transition_conditions = []
+        for trans in included_transitions:
+            transition_conditions.append(f"(m2.month = '{trans['prev']}' AND m1.month = '{trans['curr']}')")
+        transition_where = " OR ".join(transition_conditions)
+        
+        month_trunc = self._get_month_trunc('created_at')
+        
+        # 포함되는 월 전환(m-1 → m)만 합산하는 SQL 쿼리
+        # 사용자 기준 1회 집계: 동일 user_hash는 채널(web/app)과 무관하게 1회만 집계
+        # MySQL과 SQLite 호환성을 위해 분기 처리
+        if self.is_sqlite:
+            query = text(f"""
+            WITH monthly_users AS (
+                -- user_hash 기준으로 고유화 (채널 무관, web/app 이중 사용자도 1회만 집계)
+                SELECT 
+                    {month_trunc} as month,
+                    user_hash,
+                    COUNT(*) as event_count
+                FROM events 
+                WHERE {month_trunc} BETWEEN :start_month AND :end_month
+                GROUP BY {month_trunc}, user_hash
+                HAVING COUNT(*) >= :threshold
+            ),
+            all_months AS (
+                SELECT DISTINCT month FROM monthly_users
+                WHERE month BETWEEN :start_month AND :end_month
+                ORDER BY month
+            ),
+            month_pairs AS (
+                SELECT 
+                    m1.month AS curr_month,
+                    m2.month AS prev_month
+                FROM all_months m1
+                JOIN all_months m2
+                WHERE m1.month = strftime('%Y-%m', datetime(m2.month || '-01', '+1 month'))
+                AND ({transition_where})
+            ),
+            prev_active AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT mu.user_hash) AS previous_active
+                FROM month_pairs mp
+                LEFT JOIN monthly_users mu ON mu.month = mp.prev_month
+                GROUP BY mp.curr_month, mp.prev_month
+            ),
+            curr_active AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT mu.user_hash) AS current_active
+                FROM month_pairs mp
+                LEFT JOIN monthly_users mu ON mu.month = mp.curr_month
+                GROUP BY mp.curr_month, mp.prev_month
+            ),
+            churned AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT prev_mu.user_hash) AS churned_users
+                FROM month_pairs mp
+                LEFT JOIN monthly_users prev_mu ON prev_mu.month = mp.prev_month
+                LEFT JOIN monthly_users curr_mu ON curr_mu.month = mp.curr_month AND curr_mu.user_hash = prev_mu.user_hash
+                WHERE curr_mu.user_hash IS NULL
+                GROUP BY mp.curr_month, mp.prev_month
+            ),
+            retained AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT prev_mu.user_hash) AS retained_users
+                FROM month_pairs mp
+                LEFT JOIN monthly_users prev_mu ON prev_mu.month = mp.prev_month
+                INNER JOIN monthly_users curr_mu ON curr_mu.month = mp.curr_month AND curr_mu.user_hash = prev_mu.user_hash
+                GROUP BY mp.curr_month, mp.prev_month
+            )
+            SELECT 
+                mp.curr_month,
+                mp.prev_month,
+                COALESCE(pa.previous_active, 0) AS previous_active,
+                COALESCE(ca.current_active, 0) AS current_active,
+                COALESCE(ch.churned_users, 0) AS churned_users,
+                COALESCE(re.retained_users, 0) AS retained_users
+            FROM month_pairs mp
+            LEFT JOIN prev_active pa ON pa.curr_month = mp.curr_month AND pa.prev_month = mp.prev_month
+            LEFT JOIN curr_active ca ON ca.curr_month = mp.curr_month AND ca.prev_month = mp.prev_month
+            LEFT JOIN churned ch ON ch.curr_month = mp.curr_month AND ch.prev_month = mp.prev_month
+            LEFT JOIN retained re ON re.curr_month = mp.curr_month AND re.prev_month = mp.prev_month
+            ORDER BY mp.curr_month
+            """)
+        else:
+            # MySQL용 쿼리
+            query = text(f"""
+            WITH monthly_users AS (
+                -- user_hash 기준으로 고유화 (채널 무관, web/app 이중 사용자도 1회만 집계)
+                SELECT 
+                    {month_trunc} as month,
+                    user_hash,
+                    COUNT(*) as event_count
+                FROM events 
+                WHERE {month_trunc} BETWEEN :start_month AND :end_month
+                GROUP BY {month_trunc}, user_hash
+                HAVING COUNT(*) >= :threshold
+            ),
+            all_months AS (
+                SELECT DISTINCT month FROM monthly_users
+                WHERE month BETWEEN :start_month AND :end_month
+                ORDER BY month
+            ),
+            month_pairs AS (
+                SELECT 
+                    m1.month AS curr_month,
+                    m2.month AS prev_month
+                FROM all_months m1
+                JOIN all_months m2
+                WHERE m1.month = DATE_FORMAT(DATE_ADD(STR_TO_DATE(CONCAT(m2.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')
+                AND ({transition_where})
+            ),
+            prev_active AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT mu.user_hash) AS previous_active
+                FROM month_pairs mp
+                LEFT JOIN monthly_users mu ON mu.month = mp.prev_month
+                GROUP BY mp.curr_month, mp.prev_month
+            ),
+            curr_active AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT mu.user_hash) AS current_active
+                FROM month_pairs mp
+                LEFT JOIN monthly_users mu ON mu.month = mp.curr_month
+                GROUP BY mp.curr_month, mp.prev_month
+            ),
+            churned AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT prev_mu.user_hash) AS churned_users
+                FROM month_pairs mp
+                LEFT JOIN monthly_users prev_mu ON prev_mu.month = mp.prev_month
+                LEFT JOIN monthly_users curr_mu ON curr_mu.month = mp.curr_month AND curr_mu.user_hash = prev_mu.user_hash
+                WHERE curr_mu.user_hash IS NULL
+                GROUP BY mp.curr_month, mp.prev_month
+            ),
+            retained AS (
+                SELECT 
+                    mp.curr_month,
+                    mp.prev_month,
+                    COUNT(DISTINCT prev_mu.user_hash) AS retained_users
+                FROM month_pairs mp
+                LEFT JOIN monthly_users prev_mu ON prev_mu.month = mp.prev_month
+                INNER JOIN monthly_users curr_mu ON curr_mu.month = mp.curr_month AND curr_mu.user_hash = prev_mu.user_hash
+                GROUP BY mp.curr_month, mp.prev_month
+            )
+            SELECT 
+                mp.curr_month,
+                mp.prev_month,
+                COALESCE(pa.previous_active, 0) AS previous_active,
+                COALESCE(ca.current_active, 0) AS current_active,
+                COALESCE(ch.churned_users, 0) AS churned_users,
+                COALESCE(re.retained_users, 0) AS retained_users
+            FROM month_pairs mp
+            LEFT JOIN prev_active pa ON pa.curr_month = mp.curr_month AND pa.prev_month = mp.prev_month
+            LEFT JOIN curr_active ca ON ca.curr_month = mp.curr_month AND ca.prev_month = mp.prev_month
+            LEFT JOIN churned ch ON ch.curr_month = mp.curr_month AND ch.prev_month = mp.prev_month
+            LEFT JOIN retained re ON re.curr_month = mp.curr_month AND re.prev_month = mp.prev_month
+            ORDER BY mp.curr_month
+            """)
+        
+        results = self.db.execute(query, {
+            "start_month": start_month,
+            "end_month": end_month,
+            "threshold": threshold
+        }).fetchall()
+        
+        if not results:
+            return {
+                "range_churn_rate": 0,
+                "range_active_users": 0,
+                "range_previous_active_users": 0,
+                "range_churned_users": 0,
+                "range_retained_users": 0,
+                "range_reactivated_users": 0,
+                "range_long_term_inactive": 0,
+                "monthly": []
+            }
+        
+        # Decimal 타입을 int로 변환
+        from decimal import Decimal
+        def to_int(value):
+            if isinstance(value, Decimal):
+                return int(value)
+            elif value is None:
+                return 0
+            else:
+                return int(value)
+        
+        # 월별 데이터 수집 및 범위 합산
+        monthly_data = []
+        total_previous_active = 0
+        total_churned = 0
+        total_retained = 0
+        last_month_active = 0  # 마지막 월의 활성 사용자 수
+        
+        # 포함되는 전환만 필터링 (SQL 결과가 포함 전환만 포함하도록 이미 필터링됨)
+        included_transition_set = {(t["prev"], t["curr"]) for t in included_transitions}
+        
+        for row in results:
+            # 포함되는 전환인지 확인
+            if (row.prev_month, row.curr_month) not in included_transition_set:
+                continue
+            
+            prev_active = to_int(row.previous_active)
+            curr_active = to_int(row.current_active)
+            churned = to_int(row.churned_users)
+            retained = to_int(row.retained_users)
+            
+            # 월별 이탈률 계산 (분모=0 방지: prev_active가 0이면 0 반환)
+            monthly_churn_rate = (churned / prev_active * 100) if prev_active > 0 else 0
+            
+            monthly_data.append({
+                "month": row.curr_month,
+                "previous_month": row.prev_month,
+                "active_users": curr_active,
+                "previous_active_users": prev_active,
+                "churned_users": churned,
+                "retained_users": retained,
+                "churn_rate": round(monthly_churn_rate, 1)
+            })
+            
+            # 범위 합산: 포함되는 월 전환의 이전 활성, 이탈, 유지 합산
+            total_previous_active += prev_active
+            total_churned += churned
+            total_retained += retained
+            
+            # 마지막 월의 활성 사용자 수 저장
+            last_month_active = curr_active
+        
+        # 범위 전체 이탈률 계산
+        # range_churn = Σ(churned_m) / Σ(active_{m-1})
+        # 분모=0 방지: total_previous_active가 0이면 range_churn_rate = 0 반환 (null 대신 0 사용)
+        range_churn_rate = (total_churned / total_previous_active * 100) if total_previous_active > 0 else 0
+        
+        # 재활성 사용자 계산 (기간 전체)
+        range_reactivated_users = self._calculate_range_reactivated_users(start_month, end_month)
+        
+        # 장기 미접속 사용자 계산 (기간 마지막 월 기준)
+        range_long_term_inactive = self._calculate_long_term_inactive(end_month, 90)
+        
+        return {
+            "range_churn_rate": round(range_churn_rate, 1),
+            "range_active_users": last_month_active,  # 마지막 월의 활성 사용자 수
+            "range_previous_active_users": total_previous_active,  # 포함되는 월 전환의 이전 활성 합산
+            "range_churned_users": total_churned,  # 포함되는 월 전환의 이탈 합산
+            "range_retained_users": total_retained,  # 포함되는 월 전환의 유지 합산
+            "range_reactivated_users": range_reactivated_users,
+            "range_long_term_inactive": range_long_term_inactive,
+            "monthly": monthly_data,  # 각 월별 전환 데이터 배열
+            "boundary_mode": boundary_mode,  # 경계 처리 방식
+            "included_transitions": included_transitions  # 포함된 전환 목록
         }
     
     def get_churn_trends(self, months: List[str], threshold: int = 1) -> Dict:
@@ -428,42 +828,139 @@ class ChurnAnalyzer:
         
         month_trunc = self._get_month_trunc('created_at')
         
-        # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
-        # SQLite에서는 문자열을 날짜로 변환 후 빼기
-        if self.is_mysql:
-            month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(sm.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
-        elif self.is_sqlite:
-            month_subtract = "strftime('%Y-%m', datetime(sm.month || '-01', '-1 month'))"
+        # 단일 월 분석인지 확인 (start_month == end_month)
+        is_single_month = start_month == end_month
+        
+        # 이전 월 계산
+        if is_single_month:
+            # 단일 월 분석: 이전 월과 현재 월 비교
+            prev_month = self._get_previous_month(start_month)
+            # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
+            if self.is_mysql:
+                month_subtract = f"'{prev_month}'"
+            elif self.is_sqlite:
+                month_subtract = f"'{prev_month}'"
+            else:
+                month_subtract = f"'{prev_month}'"
         else:
-            month_subtract = self._get_month_subtract("STR_TO_DATE(CONCAT(sm.month, '-01'), '%Y-%m-%d')", 1)
+            # 범위 분석: 각 월의 이전 월 계산
+            if self.is_mysql:
+                month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(sm.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
+            elif self.is_sqlite:
+                month_subtract = "strftime('%Y-%m', datetime(sm.month || '-01', '-1 month'))"
+            else:
+                month_subtract = self._get_month_subtract("STR_TO_DATE(CONCAT(sm.month, '-01'), '%Y-%m-%d')", 1)
         
         try:
-            # 모든 세그먼트 타입에 대해 동일한 로직 사용
-            # 채널의 경우: 사용자가 해당 채널을 사용했으면 (이벤트가 있으면) 그 채널로 카운트
-            # 같은 사용자가 여러 채널을 사용하면 각 채널에 모두 포함됨 (독립적인 이탈률 계산)
-            query = text(f"""
-                WITH segment_monthly AS (
+            # 단일 월 분석과 범위 분석을 구분하여 처리
+            if is_single_month:
+                # 단일 월 분석: 이전 월과 현재 월만 비교
+                prev_month_value = self._get_previous_month(start_month)
+                query = text(f"""
+                    WITH segment_monthly AS (
+                        SELECT 
+                            {segment_type} AS segment_value,
+                            {month_trunc} AS month,
+                            user_hash
+                        FROM events 
+                        WHERE {month_trunc} >= :prev_month AND {month_trunc} <= :curr_month
+                          AND {segment_type} IS NOT NULL 
+                          AND {segment_type} != 'Unknown'
+                        GROUP BY {segment_type}, {month_trunc}, user_hash
+                    ),
+                    prev_active AS (
+                        SELECT 
+                            segment_value,
+                            COUNT(DISTINCT user_hash) AS previous_active
+                        FROM segment_monthly
+                        WHERE month = :prev_month
+                        GROUP BY segment_value
+                    ),
+                    curr_active AS (
+                        SELECT 
+                            segment_value,
+                            COUNT(DISTINCT user_hash) AS current_active
+                        FROM segment_monthly
+                        WHERE month = :curr_month
+                        GROUP BY segment_value
+                    ),
+                    churned AS (
+                        SELECT 
+                            pm.segment_value,
+                            COUNT(DISTINCT pm.user_hash) AS churned_users
+                        FROM segment_monthly pm
+                        WHERE pm.month = :prev_month
+                          AND NOT EXISTS (
+                              SELECT 1 FROM segment_monthly cm
+                              WHERE cm.segment_value = pm.segment_value
+                                AND cm.user_hash = pm.user_hash
+                                AND cm.month = :curr_month
+                          )
+                        GROUP BY pm.segment_value
+                    ),
+                    aggregated AS (
+                        SELECT 
+                            COALESCE(pa.segment_value, ca.segment_value) AS segment_value,
+                            COALESCE(pa.previous_active, 0) AS previous_active_sum,
+                            COALESCE(ca.current_active, 0) AS current_active_sum,
+                            COALESCE(ch.churned_users, 0) AS churned_sum
+                        FROM prev_active pa
+                        LEFT JOIN curr_active ca ON pa.segment_value = ca.segment_value
+                        LEFT JOIN churned ch ON pa.segment_value = ch.segment_value
+                        UNION
+                        SELECT 
+                            ca.segment_value,
+                            0 AS previous_active_sum,
+                            COALESCE(ca.current_active, 0) AS current_active_sum,
+                            0 AS churned_sum
+                        FROM curr_active ca
+                        WHERE NOT EXISTS (SELECT 1 FROM prev_active pa WHERE pa.segment_value = ca.segment_value)
+                    )
                     SELECT 
-                        {segment_type} AS segment_value,
-                        {month_trunc} AS month,
-                        user_hash
-                    FROM events 
-                    WHERE {month_trunc} BETWEEN :start_month AND :end_month
-                      AND {segment_type} IS NOT NULL 
-                      AND {segment_type} != 'Unknown'
-                    GROUP BY {segment_type}, {month_trunc}, user_hash
-                ),
-                segment_months AS (
-                    SELECT DISTINCT segment_value, month FROM segment_monthly
-                ),
-                month_pairs AS (
-                    SELECT 
-                        sm.segment_value,
-                        sm.month AS curr_month,
-                        {month_subtract} AS prev_month
-                    FROM segment_months sm
-                    WHERE sm.month > :start_month
-                ),
+                        segment_value,
+                        current_active_sum AS current_active,
+                        previous_active_sum AS previous_active,
+                        churned_sum AS churned,
+                        CASE 
+                            WHEN previous_active_sum > 0 THEN ROUND((CAST(churned_sum AS FLOAT) / previous_active_sum * 100), 1)
+                            ELSE 0 
+                        END AS churn_rate,
+                        CASE WHEN previous_active_sum < :min_sample THEN 1 ELSE 0 END AS is_uncertain
+                    FROM aggregated
+                    WHERE previous_active_sum > 0
+                    ORDER BY churn_rate DESC
+                    """)
+                
+                results = self.db.execute(query, {
+                    "prev_month": prev_month_value,
+                    "curr_month": start_month,
+                    "min_sample": self.min_sample_size
+                }).fetchall()
+            else:
+                # 범위 분석: 기존 로직 사용
+                query = text(f"""
+                    WITH segment_monthly AS (
+                        SELECT 
+                            {segment_type} AS segment_value,
+                            {month_trunc} AS month,
+                            user_hash
+                        FROM events 
+                        WHERE {month_trunc} BETWEEN :start_month AND :end_month
+                          AND {segment_type} IS NOT NULL 
+                          AND {segment_type} != 'Unknown'
+                        GROUP BY {segment_type}, {month_trunc}, user_hash
+                    ),
+                    segment_months AS (
+                        SELECT DISTINCT segment_value, month FROM segment_monthly
+                    ),
+                    month_pairs AS (
+                        SELECT 
+                            sm.segment_value,
+                            sm.month AS curr_month,
+                            {month_subtract} AS prev_month
+                        FROM segment_months sm
+                        WHERE sm.month > :start_month
+                    ),
                 prev_active AS (
                     SELECT 
                         mp.segment_value,
@@ -523,12 +1020,12 @@ class ChurnAnalyzer:
                 WHERE previous_active_sum > 0
                 ORDER BY churn_rate DESC
                 """)
-            
-            results = self.db.execute(query, {
-                "start_month": f"{start_month}-01",
-                "end_month": f"{end_month}-01",
-                "min_sample": self.min_sample_size
-            }).fetchall()
+                
+                results = self.db.execute(query, {
+                    "start_month": f"{start_month}-01",
+                    "end_month": f"{end_month}-01",
+                    "min_sample": self.min_sample_size
+                }).fetchall()
             
             from decimal import Decimal
             def convert_value(value):
@@ -539,6 +1036,12 @@ class ChurnAnalyzer:
             return [
                 {
                     "segment_value": row.segment_value,
+                    # range_* 필드: 기간 전체 합산 지표 (마이크로 평균)
+                    "range_current_active": int(convert_value(row.current_active)),
+                    "range_previous_active": int(convert_value(row.previous_active)),
+                    "range_churned_users": int(convert_value(row.churned)),
+                    "range_churn_rate": float(convert_value(row.churn_rate)),
+                    # 하위 호환성을 위한 기존 필드명도 유지
                     "current_active": int(convert_value(row.current_active)),
                     "previous_active": int(convert_value(row.previous_active)),
                     "churned_users": int(convert_value(row.churned)),
@@ -549,7 +1052,7 @@ class ChurnAnalyzer:
             ]
         except Exception as e:
             # SQL 에러 발생 시 빈 배열 반환
-            print(f"⚠️ 세그먼트 {segment_type} 분석 중 오류 발생: {e}")
+            print(f"[WARNING] 세그먼트 {segment_type} 분석 중 오류 발생: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -808,10 +1311,100 @@ class ChurnAnalyzer:
         
         return months
     
+    def _enumerate_in_range_transitions(self, start_date: str, end_date: str) -> Dict:
+        """범위 내 포함되는 월 전환 목록 산출
+        
+        예: 8/15~11/15 범위는 8→9, 9→10, 10→11 전환만 포함
+        
+        규칙:
+        - 시작일이 월 중간이어도 해당 월의 전환은 포함 (예: 8/15면 8→9 전환 포함)
+        - 종료일이 월 중간이어도 해당 월의 전환은 포함 (예: 11/15면 10→11 전환 포함)
+        - 경계월 부분 집계는 현재 단순화: "전환만 포함" 모드 사용
+        
+        Args:
+            start_date: 시작일 (YYYY-MM-DD 형식)
+            end_date: 종료일 (YYYY-MM-DD 형식)
+        
+        Returns:
+            {
+                "transitions": List[Dict],  # 포함되는 전환 목록 [{"prev": "2024-08", "curr": "2024-09"}, ...]
+                "boundary_mode": str,  # "month_transitions_only" (현재는 전환만 포함)
+                "start_month": str,  # 시작 월 (YYYY-MM)
+                "end_month": str,  # 종료 월 (YYYY-MM)
+                "note": str  # 경계 처리 방식 설명
+            }
+        """
+        from datetime import datetime
+        
+        # 날짜 파싱
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        start_year_month = start_dt.strftime('%Y-%m')
+        end_year_month = end_dt.strftime('%Y-%m')
+        
+        # 월 범위 생성
+        months = self._generate_month_range(start_year_month, end_year_month)
+        
+        if len(months) < 2:
+            # 최소 2개월이 필요 (전환이 발생하려면)
+            return {
+                "transitions": [],
+                "boundary_mode": "month_transitions_only",
+                "start_month": start_year_month,
+                "end_month": end_year_month,
+                "note": "범위가 2개월 미만이므로 전환이 없습니다."
+            }
+        
+        # 포함되는 전환 목록 생성
+        # 예: 8/15~11/15 → 8→9, 9→10, 10→11 전환 포함
+        # 규칙: 시작일이 속한 월(prev)부터 종료일이 속한 월(curr)까지의 전환 포함
+        transitions = []
+        
+        for i in range(1, len(months)):
+            prev_month = months[i - 1]
+            curr_month = months[i]
+            
+            # 전환이 범위 내에 완전히 포함되는지 확인
+            # 조건: prev_month >= start_year_month AND curr_month <= end_year_month
+            # 예: 8/15~11/15 → start_year_month="2024-08", end_year_month="2024-11"
+            #   - 8→9: prev=2024-08 >= 2024-08 ✓, curr=2024-09 <= 2024-11 ✓ → 포함
+            #   - 9→10: prev=2024-09 >= 2024-08 ✓, curr=2024-10 <= 2024-11 ✓ → 포함
+            #   - 10→11: prev=2024-10 >= 2024-08 ✓, curr=2024-11 <= 2024-11 ✓ → 포함
+            #   - 11→12: prev=2024-11 >= 2024-08 ✓, curr=2024-12 <= 2024-11 ✗ → 제외
+            
+            if prev_month >= start_year_month and curr_month <= end_year_month:
+                transitions.append({
+                    "prev": prev_month,
+                    "curr": curr_month
+                })
+        
+        return {
+            "transitions": transitions,
+            "boundary_mode": "month_transitions_only",
+            "start_month": start_year_month,
+            "end_month": end_year_month,
+            "note": "경계월 부분 집계는 현재 단순화되어 '전환만 포함' 모드를 사용합니다. 범위 내에 완전히 포함되는 월 전환만 집계됩니다."
+        }
+    
     def _calculate_reactivated_users(self, month: str, gap_days: int = 30) -> int:
-        """재활성 사용자 수 계산"""
+        """재활성 사용자 수 계산 (단일 월)"""
         reactivation_data = self._analyze_reactivation(month, gap_days)
         return reactivation_data.get("reactivated_users", 0)
+    
+    def _calculate_range_reactivated_users(self, start_month: str, end_month: str, gap_days: int = 30) -> int:
+        """재활성 사용자 수 계산 (기간 전체)
+        
+        기간 내 모든 월에서 재활성 사용자를 집계
+        """
+        months = self._generate_month_range(start_month, end_month)
+        total_reactivated = 0
+        
+        for month in months:
+            reactivated = self._calculate_reactivated_users(month, gap_days)
+            total_reactivated += reactivated
+        
+        return total_reactivated
     
     def _calculate_long_term_inactive(self, month: str, days: int) -> int:
         """장기 미접속 사용자 수 계산"""
@@ -1039,9 +1632,9 @@ class ChurnAnalyzer:
                 COUNT(DISTINCT CASE 
                     WHEN ps.month = mp.prev_month 
                     AND NOT EXISTS (
-                        SELECT 1 FROM user_segments cs2 
-                        WHERE cs2.user_hash = ps.user_hash 
-                        AND cs2.month = mp.curr_month
+                        SELECT 1 FROM events e
+                        WHERE e.user_hash = ps.user_hash 
+                        AND {month_trunc} = mp.curr_month
                     )
                     THEN ps.user_hash 
                 END) AS churned_users
@@ -1151,9 +1744,9 @@ class ChurnAnalyzer:
                 COUNT(DISTINCT CASE 
                     WHEN ps.month = mp.prev_month 
                     AND NOT EXISTS (
-                        SELECT 1 FROM user_segments cs2 
-                        WHERE cs2.user_hash = ps.user_hash 
-                        AND cs2.month = mp.curr_month
+                        SELECT 1 FROM events e
+                        WHERE e.user_hash = ps.user_hash 
+                        AND {month_trunc} = mp.curr_month
                     )
                     THEN ps.user_hash 
                 END) AS churned_users
@@ -1326,96 +1919,218 @@ class ChurnAnalyzer:
         
         month_trunc = self._get_month_trunc('created_at')
         
-        # MySQL의 경우 문자열 월을 DATE로 변환 후 빼기
-        # SQLite에서는 문자열을 날짜로 변환 후 빼기
-        if self.is_mysql:
-            month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(us.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
-        elif self.is_sqlite:
-            month_subtract = "strftime('%Y-%m', datetime(us.month || '-01', '-1 month'))"
-        else:
-            month_subtract = self._get_month_subtract('us.month', 1)
+        # 단일 월 분석인지 확인
+        is_single_month = start_month == end_month
         
-        query = text(f"""
-        WITH user_action_stats AS (
+        if is_single_month:
+            # 단일 월 분석: 이전 월과 현재 월 비교
+            prev_month_value = self._get_previous_month(start_month)
+            
+            query = text(f"""
+            WITH user_action_stats AS (
+                SELECT 
+                    user_hash,
+                    {month_trunc} AS month,
+                    COUNT(CASE WHEN action = 'view' THEN 1 END) AS view_count,
+                    COUNT(CASE WHEN action = 'login' THEN 1 END) AS login_count,
+                    COUNT(CASE WHEN action = 'comment' THEN 1 END) AS comment_count,
+                    COUNT(CASE WHEN action = 'like' THEN 1 END) AS like_count,
+                    COUNT(CASE WHEN action = 'post' THEN 1 END) AS post_count,
+                    COUNT(CASE WHEN action = 'post_delete' THEN 1 END) AS post_delete_count,
+                    COUNT(CASE WHEN action = 'post_modify' THEN 1 END) AS post_modify_count,
+                    COUNT(CASE WHEN action = 'comment_modify' THEN 1 END) AS comment_modify_count,
+                    COUNT(CASE WHEN action = 'comment_delete' THEN 1 END) AS comment_delete_count,
+                    COUNT(*) AS total_count
+                FROM events
+                WHERE {month_trunc} >= :prev_month AND {month_trunc} <= :curr_month
+                GROUP BY user_hash, {month_trunc}
+            ),
+            user_segments AS (
+                SELECT 
+                    user_hash,
+                    month,
+                    CASE 
+                        WHEN view_count >= login_count AND view_count >= comment_count AND view_count >= like_count 
+                         AND view_count >= post_count AND view_count >= post_delete_count AND view_count >= post_modify_count
+                         AND view_count >= comment_modify_count AND view_count >= comment_delete_count
+                        THEN 'view'
+                        WHEN login_count >= view_count AND login_count >= comment_count AND login_count >= like_count 
+                         AND login_count >= post_count AND login_count >= post_delete_count AND login_count >= post_modify_count
+                         AND login_count >= comment_modify_count AND login_count >= comment_delete_count
+                        THEN 'login'
+                        WHEN comment_count >= view_count AND comment_count >= login_count AND comment_count >= like_count 
+                         AND comment_count >= post_count AND comment_count >= post_delete_count AND comment_count >= post_modify_count
+                         AND comment_count >= comment_modify_count AND comment_count >= comment_delete_count
+                        THEN 'comment'
+                        WHEN like_count >= view_count AND like_count >= login_count AND like_count >= comment_count 
+                         AND like_count >= post_count AND like_count >= post_delete_count AND like_count >= post_modify_count
+                         AND like_count >= comment_modify_count AND like_count >= comment_delete_count
+                        THEN 'like'
+                        WHEN post_count >= view_count AND post_count >= login_count AND post_count >= comment_count 
+                         AND post_count >= like_count AND post_count >= post_delete_count AND post_count >= post_modify_count
+                         AND post_count >= comment_modify_count AND post_count >= comment_delete_count
+                        THEN 'post'
+                        ELSE 'mixed'
+                    END AS segment_value
+                FROM user_action_stats
+            ),
+            prev_active AS (
+                SELECT 
+                    segment_value,
+                    COUNT(DISTINCT user_hash) AS previous_active
+                FROM user_segments
+                WHERE month = :prev_month
+                GROUP BY segment_value
+            ),
+            curr_active AS (
+                SELECT 
+                    segment_value,
+                    COUNT(DISTINCT user_hash) AS current_active
+                FROM user_segments
+                WHERE month = :curr_month
+                GROUP BY segment_value
+            ),
+            churned AS (
+                SELECT 
+                    pm.segment_value,
+                    COUNT(DISTINCT pm.user_hash) AS churned_users
+                FROM user_segments pm
+                WHERE pm.month = :prev_month
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_segments cm
+                      WHERE cm.user_hash = pm.user_hash
+                        AND cm.month = :curr_month
+                  )
+                GROUP BY pm.segment_value
+            ),
+            aggregated AS (
+                SELECT 
+                    COALESCE(pa.segment_value, ca.segment_value) AS segment_value,
+                    COALESCE(pa.previous_active, 0) AS previous_active_sum,
+                    COALESCE(ca.current_active, 0) AS current_active_sum,
+                    COALESCE(ch.churned_users, 0) AS churned_sum
+                FROM prev_active pa
+                LEFT JOIN curr_active ca ON pa.segment_value = ca.segment_value
+                LEFT JOIN churned ch ON pa.segment_value = ch.segment_value
+                UNION
+                SELECT 
+                    ca.segment_value,
+                    0 AS previous_active_sum,
+                    COALESCE(ca.current_active, 0) AS current_active_sum,
+                    0 AS churned_sum
+                FROM curr_active ca
+                WHERE NOT EXISTS (SELECT 1 FROM prev_active pa WHERE pa.segment_value = ca.segment_value)
+            )
             SELECT 
-                user_hash,
-                {month_trunc} AS month,
-                COUNT(CASE WHEN action = 'view' THEN 1 END) AS view_count,
-                COUNT(CASE WHEN action = 'login' THEN 1 END) AS login_count,
-                COUNT(CASE WHEN action = 'comment' THEN 1 END) AS comment_count,
-                COUNT(CASE WHEN action = 'like' THEN 1 END) AS like_count,
-                COUNT(CASE WHEN action = 'post' THEN 1 END) AS post_count,
-                COUNT(*) AS total_count
-            FROM events
-            WHERE {month_trunc} BETWEEN :start_month AND :end_month
-            GROUP BY user_hash, {month_trunc}
-        ),
-        user_segments AS (
-            SELECT 
-                user_hash,
-                month,
+                segment_value,
+                current_active_sum AS current_active,
+                previous_active_sum AS previous_active,
+                churned_sum AS churned_users,
                 CASE 
-                    WHEN view_count >= login_count AND view_count >= comment_count AND view_count >= like_count AND view_count >= post_count
-                    THEN 'view'
-                    WHEN login_count >= view_count AND login_count >= comment_count AND login_count >= like_count AND login_count >= post_count
-                    THEN 'login'
-                    WHEN comment_count >= view_count AND comment_count >= login_count AND comment_count >= like_count AND comment_count >= post_count
-                    THEN 'comment'
-                    WHEN like_count >= view_count AND like_count >= login_count AND like_count >= comment_count AND like_count >= post_count
-                    THEN 'like'
-                    WHEN post_count >= view_count AND post_count >= login_count AND post_count >= comment_count AND post_count >= like_count
-                    THEN 'post'
-                    ELSE 'mixed'
-                END AS segment_value
+                    WHEN previous_active_sum > 0 THEN ROUND((CAST(churned_sum AS FLOAT) / previous_active_sum * 100), 1)
+                    ELSE 0 
+                END AS churn_rate,
+                CASE WHEN previous_active_sum < :min_sample THEN 1 ELSE 0 END AS is_uncertain
+            FROM aggregated
+            WHERE previous_active_sum > 0
+            ORDER BY churn_rate DESC
+            """)
+            
+            results = self.db.execute(query, {
+                "prev_month": prev_month_value,
+                "curr_month": start_month,
+                "min_sample": self.min_sample_size
+            }).fetchall()
+        else:
+            # 범위 분석: 기존 로직 사용
+            if self.is_mysql:
+                month_subtract = "DATE_FORMAT(DATE_SUB(STR_TO_DATE(CONCAT(us.month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')"
+            elif self.is_sqlite:
+                month_subtract = "strftime('%Y-%m', datetime(us.month || '-01', '-1 month'))"
+            else:
+                month_subtract = self._get_month_subtract('us.month', 1)
+            
+            query = text(f"""
+            WITH user_action_stats AS (
+                SELECT 
+                    user_hash,
+                    {month_trunc} AS month,
+                    COUNT(CASE WHEN action = 'view' THEN 1 END) AS view_count,
+                    COUNT(CASE WHEN action = 'login' THEN 1 END) AS login_count,
+                    COUNT(CASE WHEN action = 'comment' THEN 1 END) AS comment_count,
+                    COUNT(CASE WHEN action = 'like' THEN 1 END) AS like_count,
+                    COUNT(CASE WHEN action = 'post' THEN 1 END) AS post_count,
+                    COUNT(*) AS total_count
+                FROM events
+                WHERE {month_trunc} BETWEEN :start_month AND :end_month
+                GROUP BY user_hash, {month_trunc}
+            ),
+            user_segments AS (
+                SELECT 
+                    user_hash,
+                    month,
+                    CASE 
+                        WHEN view_count >= login_count AND view_count >= comment_count AND view_count >= like_count AND view_count >= post_count
+                        THEN 'view'
+                        WHEN login_count >= view_count AND login_count >= comment_count AND login_count >= like_count AND login_count >= post_count
+                        THEN 'login'
+                        WHEN comment_count >= view_count AND comment_count >= login_count AND comment_count >= like_count AND comment_count >= post_count
+                        THEN 'comment'
+                        WHEN like_count >= view_count AND like_count >= login_count AND like_count >= comment_count AND like_count >= post_count
+                        THEN 'like'
+                        WHEN post_count >= view_count AND post_count >= login_count AND post_count >= comment_count AND post_count >= like_count
+                        THEN 'post'
+                        ELSE 'mixed'
+                    END AS segment_value
             FROM user_action_stats
-        ),
-        month_pairs AS (
-            SELECT DISTINCT
-                us.segment_value,
-                us.month AS curr_month,
-                {month_subtract} AS prev_month
-            FROM user_segments us
-            WHERE us.month > :start_month
-        ),
-        aggregated AS (
+            ),
+            month_pairs AS (
+                SELECT DISTINCT
+                    us.segment_value,
+                    us.month AS curr_month,
+                    {month_subtract} AS prev_month
+                FROM user_segments us
+                WHERE us.month > :start_month
+            ),
+            aggregated AS (
+                SELECT 
+                    mp.segment_value,
+                    COUNT(DISTINCT CASE WHEN ps.month = mp.prev_month THEN ps.user_hash END) AS previous_active,
+                    COUNT(DISTINCT CASE WHEN cs.month = mp.curr_month THEN cs.user_hash END) AS current_active,
+                    COUNT(DISTINCT CASE 
+                        WHEN ps.month = mp.prev_month 
+                        AND NOT EXISTS (
+                            SELECT 1 FROM events e
+                            WHERE e.user_hash = ps.user_hash 
+                            AND {month_trunc} = mp.curr_month
+                        )
+                        THEN ps.user_hash 
+                    END) AS churned_users
+                FROM month_pairs mp
+                LEFT JOIN user_segments ps ON ps.segment_value = mp.segment_value AND ps.month = mp.prev_month
+                LEFT JOIN user_segments cs ON cs.segment_value = mp.segment_value AND cs.month = mp.curr_month
+                GROUP BY mp.segment_value
+            )
             SELECT 
-                mp.segment_value,
-                COUNT(DISTINCT CASE WHEN ps.month = mp.prev_month THEN ps.user_hash END) AS previous_active,
-                COUNT(DISTINCT CASE WHEN cs.month = mp.curr_month THEN cs.user_hash END) AS current_active,
-                COUNT(DISTINCT CASE 
-                    WHEN ps.month = mp.prev_month 
-                    AND NOT EXISTS (
-                        SELECT 1 FROM user_segments cs2 
-                        WHERE cs2.user_hash = ps.user_hash 
-                        AND cs2.month = mp.curr_month
-                    )
-                    THEN ps.user_hash 
-                END) AS churned_users
-            FROM month_pairs mp
-            LEFT JOIN user_segments ps ON ps.segment_value = mp.segment_value AND ps.month = mp.prev_month
-            LEFT JOIN user_segments cs ON cs.segment_value = mp.segment_value AND cs.month = mp.curr_month
-            GROUP BY mp.segment_value
-        )
-        SELECT 
-            segment_value,
-            current_active,
-            previous_active,
-            churned_users,
-            CASE 
-                WHEN previous_active > 0 THEN ROUND((CAST(churned_users AS FLOAT) / previous_active * 100), 1)
-                ELSE 0 
-            END AS churn_rate,
-            CASE WHEN previous_active < :min_sample THEN true ELSE false END AS is_uncertain
-        FROM aggregated
-        WHERE previous_active > 0
-        ORDER BY churn_rate DESC
-        """)
-        
-        results = self.db.execute(query, {
-            "start_month": f"{start_month}-01",
-            "end_month": f"{end_month}-01",
-            "min_sample": self.min_sample_size
-        }).fetchall()
+                segment_value,
+                current_active,
+                previous_active,
+                churned_users,
+                CASE 
+                    WHEN previous_active > 0 THEN ROUND((CAST(churned_users AS FLOAT) / previous_active * 100), 1)
+                    ELSE 0 
+                END AS churn_rate,
+                CASE WHEN previous_active < :min_sample THEN 1 ELSE 0 END AS is_uncertain
+            FROM aggregated
+            WHERE previous_active > 0
+            ORDER BY churn_rate DESC
+            """)
+            
+            results = self.db.execute(query, {
+                "start_month": f"{start_month}-01",
+                "end_month": f"{end_month}-01",
+                "min_sample": self.min_sample_size
+            }).fetchall()
         
         from decimal import Decimal
         def convert_value(value):

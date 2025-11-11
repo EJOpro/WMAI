@@ -372,6 +372,73 @@ def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = Non
         print(f"[ERROR] 댓글 {comment_id} - 백그라운드 분석 실패: {e}")
 
 
+def analyze_churn_risk_and_store(post_id: int, user_id: int, text: str, created_at: str):
+    """
+    백그라운드에서 이탈 위험도 분석 및 저장
+    
+    Args:
+        post_id: 게시글 ID
+        user_id: 사용자 ID
+        text: 게시글 내용
+        created_at: 생성 시간
+    """
+    try:
+        from chrun_backend.rag_pipeline.rag_checker import check_new_post
+        from chrun_backend.rag_pipeline.high_risk_store import save_high_risk_chunk
+        import uuid
+        
+        print(f"[INFO] 게시글 {post_id} - 이탈 위험도 분석 시작")
+        
+        # RAG 분석 수행
+        result = check_new_post(
+            text=text,
+            user_id=str(user_id),
+            post_id=f"board_{post_id}",
+            created_at=created_at
+        )
+        
+        decision = result.get("decision", {})
+        evidence = result.get("evidence", [])
+        risk_score = decision.get("risk_score", 0.0)
+        priority = decision.get("priority", "LOW")
+        
+        print(f"[INFO] 게시글 {post_id} - 위험도: {priority} ({risk_score:.2f})")
+        
+        # 위험도가 MEDIUM 이상이거나, evidence가 있는 경우 저장
+        if priority in ["MEDIUM", "HIGH", "CRITICAL"] or len(evidence) > 0:
+            # 전체 텍스트를 하나의 청크로 저장
+            save_high_risk_chunk({
+                "chunk_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "post_id": f"board_{post_id}",
+                "sentence": text[:500],  # 처음 500자
+                "risk_score": risk_score,
+                "created_at": created_at,
+                "confirmed": False  # 관리자 확인 전
+            })
+            
+            # Evidence의 각 문장도 저장 (유사도가 높은 것들)
+            for ev in evidence[:3]:  # 상위 3개만
+                save_high_risk_chunk({
+                    "chunk_id": str(uuid.uuid4()),
+                    "user_id": str(user_id),
+                    "post_id": f"board_{post_id}",
+                    "sentence": ev.get("sentence", ""),
+                    "risk_score": ev.get("risk_score", risk_score),
+                    "created_at": created_at,
+                    "confirmed": False
+                })
+            
+            print(f"[INFO] ⚠️ 게시글 {post_id} - 위험도 {priority} 감지! 관리자 검토 대기 중")
+        else:
+            print(f"[INFO] ✅ 게시글 {post_id} - 위험도 {priority}, 정상 범위")
+        
+    except Exception as e:
+        print(f"[ERROR] 게시글 {post_id} - 이탈 위험도 분석 실패: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def analyze_and_process_report(report_id: int, content: str, reason: str, target_type: str, target_id: int):
     """
     백그라운드에서 신고 분석 및 자동 처리
@@ -854,10 +921,20 @@ async def create_post(request: Request, data: PostCreate):
         VALUES (%s, %s, %s, %s, %s)
     """, (user['user_id'], data.title, data.content, data.category, content_status))
     
+    # ⭐ 새로 추가: RAG 기반 이탈 위험도 분석 (백그라운드)
+    if content_status != 'blocked':  # 차단되지 않은 경우만 분석
+        background_executor.submit(
+            analyze_churn_risk_and_store,
+            post_id,
+            user['user_id'],
+            data.content,
+            datetime.now().isoformat()
+        )
+        print(f"[INFO] 게시글 {post_id} - 백그라운드 이탈 위험도 분석 시작됨")
+    
     # 이벤트 기록 (게시글 작성)
     try:
         from chrun_backend.user_hash_utils import get_user_hash_for_event
-        from datetime import datetime
         user_hash = get_user_hash_for_event(user['user_id'])
         execute_query(
             "INSERT INTO events (user_hash, action, channel, created_at) VALUES (%s, %s, %s, %s)",
