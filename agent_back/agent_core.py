@@ -46,7 +46,7 @@ class CommunityAgent:
         
         # LLM 초기화
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             temperature=0.7,
             openai_api_key=api_key
         )
