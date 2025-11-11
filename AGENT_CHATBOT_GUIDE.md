@@ -187,13 +187,13 @@ project/
    - ethics_check_tool → DB에서 비윤리 로그 조회
    - match_reports_tool → DB에서 신고 통계 조회
    - trends_analysis_tool → DB에서 카테고리 통계 조회
-4. **답변 생성**: GPT-4o-mini가 도구 실행 결과를 자연어로 변환
+4. **답변 생성**: GPT-4o가 도구 실행 결과를 자연어로 변환
 5. **페이지 이동**: 필요 시 상세 페이지로 이동 버튼 제공
 
 ## ⚙️ 기술 스택
 
 - **Agent 프레임워크**: LangGraph (ReAct 패턴)
-- **LLM**: OpenAI GPT-4o-mini
+- **LLM**: OpenAI GPT-4o
 - **임베딩**: BGE-M3 (로컬, 무료, 한국어 지원)
 - **벡터 DB**: ChromaDB
 - **백엔드**: FastAPI

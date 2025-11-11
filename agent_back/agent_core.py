@@ -14,7 +14,8 @@ from langgraph.graph.message import add_messages
 from agent_back.agent_tools import AGENT_TOOLS
 from dotenv import load_dotenv
 
-# 환경 변수 로드 (config.env 우선)
+# 환경 변수 로드
+load_dotenv('.env')  # .env 파일 로드
 load_dotenv('config.env', override=True)  # config.env를 우선적으로 로드
 load_dotenv('match_config.env')  # 추가 설정
 
@@ -46,7 +47,7 @@ class CommunityAgent:
         
         # LLM 초기화
         self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             temperature=0.7,
             openai_api_key=api_key
         )
