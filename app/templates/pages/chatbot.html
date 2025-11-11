@@ -27,6 +27,61 @@
             display: none;
         }
 
+        /* 일일보고서 전용 스타일 */
+        .daily-report-bubble {
+            max-width: 100% !important;
+            padding: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+        }
+        
+        .daily-report-container .summary-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .daily-report-container .summary-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .report-section {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .report-section:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15) !important;
+        }
+        
+        .status-item {
+            transition: transform 0.2s ease, background-color 0.2s ease;
+        }
+        
+        .status-item:hover {
+            transform: scale(1.02);
+            background: #E5E7EB !important;
+        }
+        
+        .today-activity {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .today-activity::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s ease;
+        }
+        
+        .today-activity:hover::before {
+            left: 100%;
+        }
+
         /* 메인 컨테이너 - 초기에는 단일 패널 */
         .main-container {
             display: flex;
@@ -1052,14 +1107,16 @@ ${JSON.stringify(data, null, 2)}
         // 이탈 분석 결과 렌더링
         function renderChurnAnalysisResult(data, container) {
             const metrics = data.metrics || {};
-            const totalUsers = metrics.active_users || 0;
+            const activeUsers = metrics.active_users || 0;
             const churnedUsers = metrics.churned_users || 0;
             const churnRate = metrics.churn_rate || 0;
+            const reactivatedUsers = metrics.reactivated_users || 0;
+            const longTermInactive = metrics.long_term_inactive || 0;
             const insights = data.insights || [];
             const topRisks = data.top_risks || [];
             
             let html = `
-                <div class="analysis-content show" style="max-height: calc(100vh - 2rem); overflow-y: auto;">
+                <div class="analysis-content show">
                     <div class="analysis-header">
                         <h2>📊 이탈 분석 결과</h2>
                         <p style="color: #6B7280; font-size: 0.875rem;">
@@ -1067,10 +1124,14 @@ ${JSON.stringify(data, null, 2)}
                         </p>
                     </div>
                     
-                    <div class="analysis-metrics">
+                    <div class="analysis-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
                         <div class="metric-card">
-                            <div class="metric-label">전체 사용자</div>
-                            <div class="metric-value">${totalUsers.toLocaleString()}</div>
+                            <div class="metric-label">활성 사용자</div>
+                            <div class="metric-value">${activeUsers.toLocaleString()}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">재활성 사용자</div>
+                            <div class="metric-value" style="color: #10B981;">${reactivatedUsers.toLocaleString()}</div>
                         </div>
                         <div class="metric-card">
                             <div class="metric-label">이탈 사용자</div>
@@ -1079,6 +1140,10 @@ ${JSON.stringify(data, null, 2)}
                         <div class="metric-card">
                             <div class="metric-label">이탈률</div>
                             <div class="metric-value" style="color: #F59E0B;">${churnRate.toFixed(1)}%</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">장기 미접속</div>
+                            <div class="metric-value" style="color: #6B7280;">${longTermInactive.toLocaleString()}</div>
                         </div>
                     </div>
             `;
@@ -1170,44 +1235,71 @@ ${JSON.stringify(data, null, 2)}
             }
             
             // 세그먼트별 분석 결과
-            if (data.segments && data.segments.length > 0) {
+            const segments = data.segments || {};
+            if (Object.keys(segments).length > 0) {
                 html += `
                     <div style="margin-top: 1.5rem;">
                         <h3 style="font-size: 1.125rem; margin-bottom: 1rem; color: #1F2937;">세그먼트별 분석</h3>
-                        <div style="overflow-x: auto;">
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <thead>
-                                    <tr style="background: #F9FAFB; border-bottom: 2px solid #E5E7EB;">
-                                        <th style="padding: 0.75rem; text-align: left;">세그먼트</th>
-                                        <th style="padding: 0.75rem; text-align: right;">값</th>
-                                        <th style="padding: 0.75rem; text-align: right;">전체</th>
-                                        <th style="padding: 0.75rem; text-align: right;">이탈</th>
-                                        <th style="padding: 0.75rem; text-align: right;">이탈률</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
                 `;
                 
-                data.segments.forEach(seg => {
-                    const rate = seg.churn_rate || 0;
-                    const color = rate > 50 ? '#EF4444' : rate > 30 ? '#F59E0B' : '#10B981';
-                    html += `
-                        <tr style="border-bottom: 1px solid #E5E7EB;">
-                            <td style="padding: 0.75rem;">${seg.segment_name || 'N/A'}</td>
-                            <td style="padding: 0.75rem; text-align: right;">${seg.segment_value || 'N/A'}</td>
-                            <td style="padding: 0.75rem; text-align: right;">${(seg.total_users || 0).toLocaleString()}</td>
-                            <td style="padding: 0.75rem; text-align: right;">${(seg.churned_users || 0).toLocaleString()}</td>
-                            <td style="padding: 0.75rem; text-align: right; color: ${color}; font-weight: 600;">${rate.toFixed(1)}%</td>
-                        </tr>
-                    `;
-                });
+                // 각 세그먼트 타입 처리
+                const segmentNames = {
+                    'gender': '성별',
+                    'age_band': '연령대',
+                    'channel': '채널',
+                    'action_type': '이벤트 타입'
+                };
                 
-                html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                `;
+                for (const [segmentType, segmentData] of Object.entries(segments)) {
+                    if (segmentData && segmentData.length > 0) {
+                        html += `
+                            <div style="margin-bottom: 2rem;">
+                                <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: #374151; font-weight: 600;">
+                                    ${segmentNames[segmentType] || segmentType}
+                                </h4>
+                                <div>
+                                    <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 0.5rem; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                        <thead>
+                                            <tr style="background: #F9FAFB; border-bottom: 2px solid #E5E7EB;">
+                                                <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: #374151;">값</th>
+                                                <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: #374151;">현재 활성</th>
+                                                <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: #374151;">이전 활성</th>
+                                                <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: #374151;">이탈자</th>
+                                                <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: #374151;">이탈률</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                        `;
+                        
+                        segmentData.forEach(seg => {
+                            const rate = seg.churn_rate || 0;
+                            const color = rate > 50 ? '#EF4444' : rate > 30 ? '#F59E0B' : '#10B981';
+                            const isUncertain = seg.is_uncertain || false;
+                            
+                            html += `
+                                <tr style="border-bottom: 1px solid #E5E7EB;">
+                                    <td style="padding: 0.75rem; font-weight: 500;">
+                                        ${seg.segment_value || 'N/A'}
+                                        ${isUncertain ? '<span style="color: #6B7280; font-size: 0.75rem; margin-left: 0.5rem;">(표본 부족)</span>' : ''}
+                                    </td>
+                                    <td style="padding: 0.75rem; text-align: right;">${(seg.current_active || 0).toLocaleString()}</td>
+                                    <td style="padding: 0.75rem; text-align: right;">${(seg.previous_active || 0).toLocaleString()}</td>
+                                    <td style="padding: 0.75rem; text-align: right; color: #EF4444;">${(seg.churned_users || 0).toLocaleString()}</td>
+                                    <td style="padding: 0.75rem; text-align: right; color: ${color}; font-weight: 600;">${rate.toFixed(1)}%</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        html += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                
+                html += `</div>`;
             }
             
             html += `</div>`;
@@ -1245,6 +1337,310 @@ ${JSON.stringify(data, null, 2)}
                     </div>
                 </div>
             `;
+        }
+
+        // 일일 보고서 렌더링
+        function renderDailyReport(reportText, container) {
+            // 보고서 텍스트를 파싱하여 구조화된 데이터로 변환
+            const lines = reportText.split('\n');
+            const today = new Date().toLocaleDateString('ko-KR', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                weekday: 'long'
+            });
+            
+            // 섹션별 데이터 추출
+            let reportData = {
+                date: today,
+                reports: { total: 0, pending: 0, completed: 0, rejected: 0, todayNew: 0, todayProcessed: 0 },
+                ethics: { total: 0, highRisk: 0, spam: 0 },
+                churn: { rate: 0, users: 0, churned: 0 },
+                trends: []
+            };
+            
+            // 더 유연한 파싱 (모든 가능한 패턴 시도)
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // 신고 관련 데이터 파싱 - 더 유연한 패턴
+                // 총 신고 건수: "• 총 신고 건수: 62건" 또는 "총 신고 건수: 1,234건" 등 다양한 형식
+                if (line.includes('총 신고 건수')) {
+                    // 다양한 패턴 시도: "• 총 신고 건수: 62건", "총 신고 건수: 1,234건", "총 신고 건수 62건" 등
+                    // • 기호, 콜론, 공백 등 다양한 형식 지원
+                    const patterns = [
+                        /[•\s]*총\s*신고\s*건수[:\s]+(\d+(?:,\d+)*)\s*건/i,
+                        /[•\s]*총\s*신고\s*건수[:\s]+(\d+(?:,\d+)*)/i,
+                        /총\s*신고\s*건수.*?(\d+(?:,\d+)*)\s*건/i,
+                        /총\s*신고\s*건수.*?(\d+(?:,\d+)*)/i
+                    ];
+                    
+                    for (const pattern of patterns) {
+                        const match = line.match(pattern);
+                        if (match && match[1]) {
+                            const numStr = match[1].replace(/,/g, '');
+                            if (numStr && !isNaN(parseInt(numStr))) {
+                                reportData.reports.total = parseInt(numStr);
+                                console.log('총 신고 건수 파싱됨:', reportData.reports.total, '원본 라인:', line);
+                                break;
+                            }
+                        }
+                    }
+                } else if (line.includes('대기중') && (line.includes('건') || /\d+/.test(line))) {
+                    const match = line.match(/(\d+(?:,\d+)*)\s*건/);
+                    if (match) {
+                        reportData.reports.pending = parseInt(match[1].replace(/,/g, ''));
+                        console.log('대기중 파싱됨:', reportData.reports.pending);
+                    }
+                } else if (line.includes('처리완료') && (line.includes('건') || /\d+/.test(line))) {
+                    const match = line.match(/(\d+(?:,\d+)*)\s*건/);
+                    if (match) {
+                        reportData.reports.completed = parseInt(match[1].replace(/,/g, ''));
+                        console.log('처리완료 파싱됨:', reportData.reports.completed);
+                    }
+                } else if (line.includes('거부됨') && (line.includes('건') || /\d+/.test(line))) {
+                    const match = line.match(/(\d+(?:,\d+)*)\s*건/);
+                    if (match) {
+                        reportData.reports.rejected = parseInt(match[1].replace(/,/g, ''));
+                        console.log('거부됨 파싱됨:', reportData.reports.rejected);
+                    }
+                } else if (line.includes('신규 접수') && (line.includes('건') || /\d+/.test(line))) {
+                    const match = line.match(/(\d+(?:,\d+)*)\s*건/);
+                    if (match) {
+                        reportData.reports.todayNew = parseInt(match[1].replace(/,/g, ''));
+                        console.log('신규 접수 파싱됨:', reportData.reports.todayNew);
+                    }
+                } else if (line.includes('처리 완료') && (line.includes('건') || /\d+/.test(line))) {
+                    const match = line.match(/(\d+(?:,\d+)*)\s*건/);
+                    if (match) {
+                        reportData.reports.todayProcessed = parseInt(match[1].replace(/,/g, ''));
+                        console.log('처리 완료 파싱됨:', reportData.reports.todayProcessed);
+                    }
+                }
+                
+                // 이탈률 데이터 파싱 - 더 유연한 패턴
+                else if (line.includes('이탈률') && line.includes('%')) {
+                    const match = line.match(/([\d.]+)%/);
+                    if (match) {
+                        reportData.churn.rate = parseFloat(match[1]);
+                        console.log('이탈률 파싱됨:', reportData.churn.rate);
+                    }
+                }
+                
+                // 비윤리/스팸 데이터 파싱 - 더 유연한 패턴
+                else if (line.includes('고위험') && line.includes('건')) {
+                    const match = line.match(/(\d+)\s*건/);
+                    if (match) {
+                        reportData.ethics.highRisk = parseInt(match[1]);
+                        console.log('고위험 콘텐츠 파싱됨:', reportData.ethics.highRisk);
+                    }
+                } else if (line.includes('스팸') && line.includes('건')) {
+                    const match = line.match(/(\d+)\s*건/);
+                    if (match) {
+                        reportData.ethics.spam = parseInt(match[1]);
+                        console.log('스팸 감지 파싱됨:', reportData.ethics.spam);
+                    }
+                } else if (line.includes('분석된') && line.includes('건')) {
+                    const match = line.match(/(\d+(?:,\d+)*)\s*건/);
+                    if (match) {
+                        reportData.ethics.total = parseInt(match[1].replace(/,/g, ''));
+                        console.log('분석된 콘텐츠 파싱됨:', reportData.ethics.total);
+                    }
+                }
+            }
+            
+            // 디버깅용 로그
+            console.log('원본 보고서 텍스트:', reportText);
+            console.log('파싱된 보고서 데이터:', reportData);
+            console.log('텍스트 라인들:', lines);
+            
+            container.innerHTML = `
+                <div class="daily-report-container" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 1rem; color: white; margin-bottom: 1rem;">
+                    <div class="report-header" style="text-align: center; margin-bottom: 2rem;">
+                        <h1 style="font-size: 2rem; margin-bottom: 0.5rem; font-weight: 700;">📋 일일 운영 보고서</h1>
+                        <p style="font-size: 1.125rem; opacity: 0.9;">${reportData.date}</p>
+                    </div>
+                    
+                    <!-- 핵심 지표 요약 -->
+                    <div class="summary-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                        <div class="summary-card" style="background: rgba(255,255,255,0.15); padding: 1.5rem; border-radius: 0.75rem; text-align: center; backdrop-filter: blur(10px);">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📢</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem;">${reportData.reports.total}</div>
+                            <div style="opacity: 0.8;">총 신고 건수</div>
+                        </div>
+                        <div class="summary-card" style="background: rgba(255,255,255,0.15); padding: 1.5rem; border-radius: 0.75rem; text-align: center; backdrop-filter: blur(10px);">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">⏳</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem;">${reportData.reports.pending}</div>
+                            <div style="opacity: 0.8;">대기중</div>
+                        </div>
+                        <div class="summary-card" style="background: rgba(255,255,255,0.15); padding: 1.5rem; border-radius: 0.75rem; text-align: center; backdrop-filter: blur(10px);">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📈</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem;">${reportData.churn.rate.toFixed(1)}%</div>
+                            <div style="opacity: 0.8;">이탈률</div>
+                        </div>
+                        <div class="summary-card" style="background: rgba(255,255,255,0.15); padding: 1.5rem; border-radius: 0.75rem; text-align: center; backdrop-filter: blur(10px);">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📥</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem;">${reportData.reports.todayNew}</div>
+                            <div style="opacity: 0.8;">오늘 신규 접수</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 상세 섹션들 -->
+                <div class="report-sections" style="display: grid; gap: 1.5rem;">
+                    <!-- 신고 현황 섹션 -->
+                    <div class="report-section" style="background: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div class="section-header" style="display: flex; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #E5E7EB;">
+                            <span style="font-size: 1.5rem; margin-right: 0.75rem;">📢</span>
+                            <h3 style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">신고 및 처리 현황</h3>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                            <div class="status-item" style="text-align: center; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">${reportData.reports.completed}</div>
+                                <div style="font-size: 0.875rem; color: #10B981;">✅ 처리완료</div>
+                            </div>
+                            <div class="status-item" style="text-align: center; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">${reportData.reports.pending}</div>
+                                <div style="font-size: 0.875rem; color: #F59E0B;">⏳ 대기중</div>
+                            </div>
+                            <div class="status-item" style="text-align: center; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">${reportData.reports.rejected}</div>
+                                <div style="font-size: 0.875rem; color: #EF4444;">❌ 거부됨</div>
+                            </div>
+                        </div>
+                        
+                        <div class="today-activity" style="background: linear-gradient(135deg, #10B981, #059669); padding: 1rem; border-radius: 0.5rem; color: white;">
+                            <h4 style="margin-bottom: 0.75rem; font-weight: 600;">오늘의 활동</h4>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>📥 신규 접수: <strong>${reportData.reports.todayNew}건</strong></span>
+                                <span>✔️ 처리 완료: <strong>${reportData.reports.todayProcessed}건</strong></span>
+                            </div>
+                        </div>
+                        
+                        ${reportData.reports.pending > 10 ? `
+                            <div style="margin-top: 1rem; padding: 0.75rem; background: #FEF3C7; border-left: 4px solid #F59E0B; border-radius: 0.375rem;">
+                                <div style="color: #92400E; font-weight: 600;">⚠️ 주의사항</div>
+                                <div style="color: #78350F; font-size: 0.875rem;">대기중인 신고가 10건 이상입니다. 빠른 처리가 필요합니다.</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    <!-- 이탈률 현황 섹션 -->
+                    <div class="report-section" style="background: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div class="section-header" style="display: flex; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #E5E7EB;">
+                            <span style="font-size: 1.5rem; margin-right: 0.75rem;">📈</span>
+                            <h3 style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">이탈률 현황</h3>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                            <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #F59E0B, #D97706); border-radius: 0.5rem; color: white;">
+                                <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem;">${reportData.churn.rate.toFixed(1)}%</div>
+                                <div style="opacity: 0.9;">현재 이탈률</div>
+                            </div>
+                            <div style="text-align: center; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937; margin-bottom: 0.25rem;">양호</div>
+                                <div style="font-size: 0.875rem; color: #6B7280;">상태 평가</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 1rem; padding: 0.75rem; background: #EBF8FF; border-left: 4px solid #3B82F6; border-radius: 0.375rem;">
+                            <div style="color: #1E40AF; font-weight: 600; font-size: 0.875rem;">💡 인사이트</div>
+                            <div style="color: #1E3A8A; font-size: 0.875rem; margin-top: 0.25rem;">이탈률이 안정적인 수준을 유지하고 있습니다. 지속적인 모니터링이 필요합니다.</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 비윤리/스팸 현황 섹션 -->
+                    <div class="report-section" style="background: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div class="section-header" style="display: flex; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #E5E7EB;">
+                            <span style="font-size: 1.5rem; margin-right: 0.75rem;">⚠️</span>
+                            <h3 style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">비윤리/스팸 현황</h3>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                            <div style="text-align: center; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">${reportData.ethics.highRisk}</div>
+                                <div style="font-size: 0.875rem; color: #EF4444;">고위험 콘텐츠</div>
+                            </div>
+                            <div style="text-align: center; padding: 1rem; background: #F9FAFB; border-radius: 0.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">${reportData.ethics.spam}</div>
+                                <div style="font-size: 0.875rem; color: #F59E0B;">스팸 감지</div>
+                            </div>
+                            <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #10B981, #059669); border-radius: 0.5rem; color: white;">
+                                <div style="font-size: 1.25rem; font-weight: 600;">${(reportData.ethics.highRisk === 0 && reportData.ethics.spam === 0) ? '안전' : '주의'}</div>
+                                <div style="font-size: 0.875rem; opacity: 0.9;">전체 상태</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 액션 아이템 섹션 -->
+                    <div class="report-section" style="background: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div class="section-header" style="display: flex; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #E5E7EB;">
+                            <span style="font-size: 1.5rem; margin-right: 0.75rem;">✅</span>
+                            <h3 style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">오늘의 액션 아이템</h3>
+                        </div>
+                        
+                        <div style="space-y: 0.75rem;">
+                            ${reportData.reports.pending > 0 ? `
+                                <div style="display: flex; align-items: center; padding: 0.75rem; background: #FEF3C7; border-radius: 0.5rem; margin-bottom: 0.75rem;">
+                                    <span style="margin-right: 0.75rem; font-size: 1.25rem;">🔍</span>
+                                    <div>
+                                        <div style="font-weight: 600; color: #92400E;">대기중인 신고 ${reportData.reports.pending}건 검토</div>
+                                        <div style="font-size: 0.875rem; color: #78350F;">우선순위: 높음</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            <div style="display: flex; align-items: center; padding: 0.75rem; background: #E0F2FE; border-radius: 0.5rem; margin-bottom: 0.75rem;">
+                                <span style="margin-right: 0.75rem; font-size: 1.25rem;">📊</span>
+                                <div>
+                                    <div style="font-weight: 600; color: #0C4A6E;">주간 트렌드 분석 리포트 작성</div>
+                                    <div style="font-size: 0.875rem; color: #075985;">우선순위: 중간</div>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; padding: 0.75rem; background: #F0FDF4; border-radius: 0.5rem;">
+                                <span style="margin-right: 0.75rem; font-size: 1.25rem;">🔄</span>
+                                <div>
+                                    <div style="font-weight: 600; color: #14532D;">사용자 피드백 수집 및 분석</div>
+                                    <div style="font-size: 0.875rem; color: #166534;">우선순위: 낮음</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 원본 보고서 텍스트 (접을 수 있는 형태) -->
+                    <div class="report-section" style="background: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div class="section-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid #E5E7EB;">
+                            <div style="display: flex; align-items: center;">
+                                <span style="font-size: 1.5rem; margin-right: 0.75rem;">📄</span>
+                                <h3 style="font-size: 1.25rem; font-weight: 600; color: #1F2937;">상세 보고서</h3>
+                            </div>
+                            <button onclick="toggleDetailReport()" style="background: #6366F1; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-size: 0.875rem; cursor: pointer;">
+                                상세 보기
+                            </button>
+                        </div>
+                        
+                        <div id="detailReportContent" style="display: none;">
+                            <pre style="background: #F9FAFB; padding: 1rem; border-radius: 0.5rem; font-family: 'Courier New', monospace; font-size: 0.875rem; line-height: 1.6; color: #374151; white-space: pre-wrap; overflow-x: auto;">${escapeHtml(reportText)}</pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 상세 보고서 토글 함수
+        function toggleDetailReport() {
+            const content = document.getElementById('detailReportContent');
+            const button = event.target;
+            
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                button.textContent = '접기';
+            } else {
+                content.style.display = 'none';
+                button.textContent = '상세 보기';
+            }
         }
 
         // 메시지 전송
@@ -1292,26 +1688,42 @@ ${JSON.stringify(data, null, 2)}
                 displayContent = displayContent.trim();
             }
 
-            let messageHTML = `
-                <div class="message-bubble">
-                    <div class="message-content">${escapeHtml(displayContent)}</div>
-            `;
-
-            if (toolBadge) {
-                messageHTML += `<div class="tool-badge">🛠️ ${toolBadge}</div>`;
-            }
-
-            if (pageUrl) {
-                const pageName = getPageName(pageUrl);
-                messageHTML += `
-                    <a href="${pageUrl}" class="page-action-btn" target="_blank">
-                        📊 ${pageName} 바로가기
-                    </a>
+            // 일일보고서 특별 처리
+            if (type === 'bot' && window.isDailyReport && toolBadge === '일일 보고서') {
+                // 일일보고서 전용 렌더링 사용
+                const reportContainer = document.createElement('div');
+                reportContainer.className = 'message-bubble daily-report-bubble';
+                renderDailyReport(displayContent, reportContainer);
+                messageDiv.appendChild(reportContainer);
+                
+                // 도구 배지 숨김 (일일보고서는 도구 배지 표시 안 함)
+                
+                // 플래그 리셋
+                window.isDailyReport = false;
+            } else {
+                // 일반 메시지 처리
+                let messageHTML = `
+                    <div class="message-bubble">
+                        <div class="message-content">${escapeHtml(displayContent)}</div>
                 `;
-            }
 
-            messageHTML += '</div>';
-            messageDiv.innerHTML = messageHTML;
+                if (toolBadge) {
+                    messageHTML += `<div class="tool-badge">🛠️ ${toolBadge}</div>`;
+                }
+
+                if (pageUrl) {
+                    const pageName = getPageName(pageUrl);
+                    messageHTML += `
+                        <a href="${pageUrl}" class="page-action-btn" target="_blank">
+                            📊 ${pageName} 바로가기
+                        </a>
+                    `;
+                }
+
+                messageHTML += '</div>';
+                messageDiv.innerHTML = messageHTML;
+            }
+            
             messagesContainer.appendChild(messageDiv);
             scrollToBottom();
         }
@@ -1600,6 +2012,9 @@ ${JSON.stringify(data, null, 2)}
                             // 일일 보고서 도구는 단일 패널 유지 (도구 미사용 UI)
                             console.log('일일 보고서 도구 - 단일 패널 유지');
                             disableSplitView();
+                            
+                            // 일일 보고서 특별 렌더링 플래그 설정
+                            window.isDailyReport = true;
                         } else {
                             // 다른 도구는 iframe
                             enableSplitView(actualToolId, 'auto');

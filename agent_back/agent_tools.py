@@ -335,13 +335,20 @@ def churn_analysis_tool(query: str) -> str:
     Returns:
         실행 명령 JSON 문자열
     """
-    # 현재 날짜 기준으로 기간 계산 (데이터가 있는 과거 날짜 사용)
-    # 2025년 데이터가 없을 수 있으므로 2024년 데이터 사용
-    now = datetime(2024, 12, 31)  # 데이터가 있을 가능성이 높은 날짜
-    end_month = now.strftime("%Y-%m")
+    # 현재 날짜 기준으로 지난 달(완전한 월) 분석
+    now = datetime.now()
+    
+    # 지난 달을 end_month로 설정 (완전한 월 데이터)
+    if now.day < 5:  # 월초에는 전전월 사용
+        end_date = now.replace(day=1) - timedelta(days=1)
+        end_date = end_date.replace(day=1) - timedelta(days=1)
+    else:
+        end_date = now.replace(day=1) - timedelta(days=1)
+    
+    end_month = end_date.strftime("%Y-%m")
     
     # 3개월 전 계산
-    start_date = now - timedelta(days=90)
+    start_date = end_date - timedelta(days=90)
     start_month = start_date.strftime("%Y-%m")
     
     # 실행 명령 JSON 생성 (API 스키마에 맞게 수정)
@@ -359,7 +366,7 @@ def churn_analysis_tool(query: str) -> str:
                 "combined": False,
                 "weekday_pattern": False,
                 "time_pattern": False,
-                "action_type": False
+                "action_type": True
             },
             "inactivity_days": [30, 60, 90],
             "threshold": 1
