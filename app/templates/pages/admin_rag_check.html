@@ -341,6 +341,109 @@
             border-radius: 4px;
         }
 
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .evidence-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 0.95rem;
+        }
+
+        .evidence-table thead {
+            background: #f1f5f9;
+        }
+
+        .evidence-table th,
+        .evidence-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: left;
+            vertical-align: top;
+            word-break: break-word;
+            white-space: normal;
+        }
+
+        .evidence-table th {
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .btn-feedback {
+            background: #e2e8f0;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            margin-right: 6px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .btn-feedback.match {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .btn-feedback.mismatch {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .btn-feedback.update {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .btn-feedback:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-feedback:not(:disabled):hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+        }
+
+        .evidence-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(153, 27, 27, 0.95);
+            color: #fff7ed;
+            padding: 14px 22px;
+            border-radius: 999px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.25);
+            display: none;
+            z-index: 999;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            text-align: center;
+        }
+
+        .toast.show {
+            display: block;
+            animation: toast-in 0.3s ease-out forwards;
+        }
+
+        @keyframes toast-in {
+            from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+
+        @keyframes toast-out {
+            from { opacity: 1; transform: translateX(-50%) translateY(0); }
+            to { opacity: 0; transform: translateX(-50%) translateY(20px); }
+        }
+
         .error-message {
             background: #fee2e2;
             color: #991b1b;
@@ -372,6 +475,10 @@
             
             .content {
                 padding: 20px;
+            }
+            
+            .evidence-table {
+                font-size: 0.9rem;
             }
         }
     </style>
@@ -488,12 +595,36 @@
                     <h3>📚 유사한 확인된 위험 문장들</h3>
                     <div id="evidenceList"></div>
                 </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <h3>🗂 최근 피드백 기록</h3>
+                    <div class="table-responsive">
+                        <table class="evidence-table">
+                            <thead>
+                                <tr>
+                                    <th>시간</th>
+                                    <th>사용자 해시</th>
+                                    <th>라벨</th>
+                                    <th>예측 점수</th>
+                                    <th>문장</th>
+                                </tr>
+                            </thead>
+                            <tbody id="feedbackHistoryBody">
+                                <tr>
+                                    <td colspan="5" class="no-evidence">피드백 데이터를 불러오는 중입니다...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <!-- 에러 메시지 -->
             <div class="error-message" id="errorMessage" style="display: none;"></div>
         </div>
     </div>
+
+    <div id="toast" class="toast" role="status" aria-live="assertive"></div>
 
     <script>
         // 현재 시각 설정 함수
@@ -583,10 +714,35 @@
             const errorElement = document.getElementById('errorMessage');
             errorElement.textContent = message;
             errorElement.style.display = 'block';
+            showToast(message);
         }
 
         function hideError() {
             document.getElementById('errorMessage').style.display = 'none';
+        }
+
+        let toastTimer;
+        function showToast(message, type = "error") {
+            const toast = document.getElementById('toast');
+            clearTimeout(toastTimer);
+            toast.textContent = message;
+            if (type === "success") {
+                toast.style.background = "rgba(16, 185, 129, 0.95)";
+            } else {
+                toast.style.background = "rgba(153, 27, 27, 0.95)";
+            }
+            toast.classList.add('show');
+            toast.style.animation = 'toast-in 0.3s ease-out forwards';
+            toastTimer = setTimeout(() => hideToast(), 4000);
+        }
+
+        function hideToast() {
+            const toast = document.getElementById('toast');
+            toast.style.animation = 'toast-out 0.25s ease-in forwards';
+            toastTimer = setTimeout(() => {
+                toast.classList.remove('show');
+                toast.style.animation = '';
+            }, 250);
         }
 
         // 결과 표시 함수
@@ -611,6 +767,7 @@
             
             // 결과 섹션 표시
             showResults();
+            loadFeedbackHistory();
         }
 
         // 위험도 점수 표시
@@ -671,25 +828,127 @@
                 return;
             }
             
-            evidenceList.innerHTML = evidence.map(item => `
-                <div class="evidence-item">
-                    <div class="evidence-sentence">
-                        "${item.sentence || '알 수 없음'}"
-                    </div>
-                    <div class="evidence-match">
-                        → 매칭: "${item.matched_sentence || '알 수 없음'}"
-                    </div>
-                    <div class="evidence-meta">
-                        <span class="similarity-score">
-                            유사도: ${((item.matched_score || 0) * 100).toFixed(1)}%
-                        </span>
-                        <span>위험점수: ${((item.risk_score || 0) * 100).toFixed(1)}%</span>
-                        <span>출처: ${item.matched_post_id || 'N/A'}</span>
-                        <span>시점: ${item.matched_created_at ? new Date(item.matched_created_at).toLocaleDateString() : 'N/A'}</span>
-                    </div>
+            const rows = evidence.map(item => `
+                <tr>
+                    <td>"${item.sentence || '알 수 없음'}"</td>
+                    <td>"${item.matched_sentence || item.matched || '알 수 없음'}"</td>
+                    <td>${((item.risk_score ?? item.prev_score ?? 0) * 100).toFixed(1)}%</td>
+                    <td>${((item.matched_score ?? item.sim ?? 0) * 100).toFixed(1)}%</td>
+                    <td>${item.matched_post_id || 'N/A'}</td>
+                    <td>${item.matched_created_at ? new Date(item.matched_created_at).toLocaleString() : 'N/A'}</td>
+                    <td>
+                        <button class="btn-feedback match" data-chunk="${item.vector_chunk_id || item.chunk_id || ''}" data-sentence="${encodeURIComponent(item.matched_sentence || item.sentence || '')}" data-score="${item.risk_score ?? item.matched_score ?? 0}" data-label="MATCH" onclick="handleFeedbackClick(event)">맞음</button>
+                        <button class="btn-feedback mismatch" data-chunk="${item.vector_chunk_id || item.chunk_id || ''}" data-sentence="${encodeURIComponent(item.matched_sentence || item.sentence || '')}" data-score="${item.risk_score ?? item.matched_score ?? 0}" data-label="MISMATCH" onclick="handleFeedbackClick(event)">틀림</button>
+                        <button class="btn-feedback update" data-chunk="${item.vector_chunk_id || item.chunk_id || ''}" data-sentence="${encodeURIComponent(item.matched_sentence || item.sentence || '')}" data-score="${item.risk_score ?? item.matched_score ?? 0}" data-label="UPDATE" onclick="handleFeedbackClick(event)">수정</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            evidenceList.innerHTML = `
+                <div class="table-responsive">
+                    <table class="evidence-table">
+                        <thead>
+                            <tr>
+                                <th>입력 문장</th>
+                                <th>Matched 문장</th>
+                                <th>기존 위험점수<br>(prev_score)</th>
+                                <th>유사도<br>(sim)</th>
+                                <th>출처</th>
+                                <th>시점</th>
+                                <th>피드백</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows}
+                        </tbody>
+                    </table>
                 </div>
+            `;
+        }
+
+        async function handleFeedbackClick(event) {
+            const button = event.currentTarget;
+            const chunkId = button.dataset.chunk || "";
+            const sentence = decodeURIComponent(button.dataset.sentence || "");
+            const rawScore = parseFloat(button.dataset.score || "0");
+            const predScore = Number.isFinite(rawScore) ? rawScore : 0;
+            const normalizedScore = Math.max(0, Math.min(1, predScore));
+            const finalLabel = button.dataset.label || "MATCH";
+
+            if (!chunkId) {
+                showToast("청크 ID를 찾을 수 없습니다.");
+                return;
+            }
+
+            button.disabled = true;
+            try {
+                const response = await fetch('/api/risk/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        chunk_id: chunkId,
+                        confirmed: finalLabel === "MATCH",
+                        sentence: sentence,
+                        pred_score: normalizedScore,
+                        final_label: finalLabel
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || `HTTP ${response.status}`);
+                }
+
+                showToast("피드백이 저장되었습니다.", "success");
+                await loadFeedbackHistory();
+            } catch (err) {
+                console.error('피드백 전송 실패:', err);
+                showToast(`피드백 전송 실패: ${err.message}`);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function loadFeedbackHistory(limit = 20) {
+            try {
+                const response = await fetch(`/api/risk/feedback?limit=${limit}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                renderFeedbackHistory(data.items || []);
+            } catch (err) {
+                console.error('피드백 로그 조회 실패:', err);
+            }
+        }
+
+        function renderFeedbackHistory(items) {
+            const tableBody = document.getElementById('feedbackHistoryBody');
+            if (!items.length) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="no-evidence">저장된 피드백이 없습니다.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tableBody.innerHTML = items.map(item => `
+                <tr>
+                    <td>${item.created_at ? new Date(item.created_at).toLocaleString() : '-'}</td>
+                    <td>${item.user_hash || 'anonymous'}</td>
+                    <td>${item.final_label}</td>
+                    <td>${(item.pred_score * 100).toFixed(1)}%</td>
+                    <td>"${item.sentence || ''}"</td>
+                </tr>
             `).join('');
         }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFeedbackHistory();
+        });
     </script>
 </body>
 </html>

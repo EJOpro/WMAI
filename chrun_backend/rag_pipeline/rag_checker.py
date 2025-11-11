@@ -9,6 +9,7 @@ RAG 기반 위험도 체크 모듈
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import logging
+import time
 
 # 설정 상수
 MAX_SENTENCES_PER_QUERY = 3  # 문장당 검색할 최대 유사 문장 수
@@ -87,9 +88,18 @@ def check_new_post(text: str, user_id: str, post_id: str, created_at: str) -> Di
             if len(sentence) > MAX_SENTENCE_LENGTH:
                 logger.debug(f"문장이 너무 김: {len(sentence)}글자 (최대: {MAX_SENTENCE_LENGTH})")
                 continue
-                
-            # 문장별 유사 위험 문장 검색
-            evidence_for_sentence = _search_similar_risk_sentences(sentence)
+            
+            # ⭐ 문맥 정보 추출 (메타데이터 강화)
+            prev_sentence = sentence_data.get('prev_sentence', '')
+            next_sentence = sentence_data.get('next_sentence', '')
+            
+            # 문장별 유사 위험 문장 검색 (문맥 주입)
+            evidence_for_sentence = _search_similar_risk_sentences(
+                sentence=sentence,
+                prev_sentence=prev_sentence,
+                next_sentence=next_sentence,
+                use_contextual=True  # 문맥 주입 활성화
+            )
             
             # ChromaDB가 없을 때 테스트 데이터 생성
             if not evidence_for_sentence:
@@ -122,20 +132,31 @@ def check_new_post(text: str, user_id: str, post_id: str, created_at: str) -> Di
             "stats": stats
         }
         
-        # 7. LLM 기반 최종 결정 (evidence가 있을 때만)
+        # 7. LLM 기반 최종 결정 (⭐ 항상 호출 - Evidence 없어도 원문으로 판단)
         decision = None
-        if final_evidence:
-            try:
-                from .rag_decider import decide_with_rag
-                decision = decide_with_rag(context)
-                logger.info(f"LLM 결정 완료: risk_score={decision.get('risk_score')}, priority={decision.get('priority')}")
-            except Exception as llm_error:
-                logger.error(f"LLM 결정 중 오류: {llm_error}")
-                # LLM 실패 시 기본 결정 생성
+        try:
+            from .rag_decider import decide_with_rag
+            
+            # Evidence 유무에 따른 로그 출력
+            if not final_evidence:
+                logger.info("[RAG] ChromaDB에 유사 문장이 없습니다. LLM이 원문만으로 판단합니다.")
+            else:
+                logger.info(f"[RAG] {len(final_evidence)}개 유사 문장을 참고하여 LLM이 판단합니다.")
+            
+            # LLM 호출 (Evidence 없어도 원문 분석 가능)
+            decision = decide_with_rag(context)
+            logger.info(f"LLM 결정 완료: risk_score={decision.get('risk_score')}, priority={decision.get('priority')}")
+            
+        except Exception as llm_error:
+            logger.error(f"LLM 결정 중 오류: {llm_error}")
+            import traceback
+            traceback.print_exc()
+            
+            # LLM 실패 시에만 fallback 사용
+            if final_evidence:
                 decision = _create_basic_decision(context)
-        else:
-            # evidence가 없으면 안전한 기본 결정
-            decision = _create_safe_decision()
+            else:
+                decision = _create_safe_decision()
         
         # 8. 최종 응답 구성
         final_response = {
@@ -194,30 +215,63 @@ def _split_text_to_sentences(text: str, user_id: str, post_id: str, created_at: 
         return []
 
 
-def _search_similar_risk_sentences(sentence: str) -> List[Dict[str, Any]]:
+def _search_similar_risk_sentences(
+    sentence: str,
+    prev_sentence: str = "",
+    next_sentence: str = "",
+    use_contextual: bool = True
+) -> List[Dict[str, Any]]:
     """
     주어진 문장과 유사한 확인된 위험 문장들을 검색합니다.
+    (⭐ 문맥 주입 임베딩 지원)
     
     Args:
-        sentence (str): 검색할 문장
+        sentence (str): 검색할 핵심 문장
+        prev_sentence (str): 이전 문장 (문맥 제공)
+        next_sentence (str): 다음 문장 (문맥 제공)
+        use_contextual (bool): 문맥 주입 임베딩 사용 여부 (기본값: True)
         
     Returns:
         List[Dict[str, Any]]: 유사한 위험 문장 리스트
     """
     try:
-        # 임베딩 생성
-        from .embedding_service import get_embedding
-        embedding = get_embedding(sentence)
+        # 임베딩 생성 (문맥 주입 방식 우선)
+        embed_start = time.perf_counter()
+        
+        if use_contextual and (prev_sentence or next_sentence):
+            # ⭐ 문맥 주입 임베딩 사용
+            from .embedding_service import get_contextual_embedding
+            embedding = get_contextual_embedding(
+                sentence=sentence,
+                prev_sentence=prev_sentence,
+                next_sentence=next_sentence,
+                context_format="structured"
+            )
+            logger.info("[RAG] 문맥 주입 임베딩 생성 완료")
+        else:
+            # 기본 임베딩 사용
+            from .embedding_service import get_embedding
+            embedding = get_embedding(sentence)
+            logger.info("[RAG] 기본 임베딩 생성 완료")
+        
+        embed_elapsed = (time.perf_counter() - embed_start) * 1000
+        logger.info("[RAG] 임베딩 생성 시간: %.2f ms", embed_elapsed)
         
         # 벡터DB에서 유사 문장 검색
         from .vector_db import get_client, search_similar
         client = get_client()
-        
+        search_start = time.perf_counter()
         similar_results = search_similar(
             client=client,
             embedding=embedding,
             top_k=MAX_SENTENCES_PER_QUERY,
             min_score=MIN_SIMILARITY_SCORE
+        )
+        search_elapsed = (time.perf_counter() - search_start) * 1000
+        logger.info(
+            "[RAG] 유사 문장 검색 완료: %d건 (%.2f ms)",
+            len(similar_results),
+            search_elapsed
         )
         
         # 결과 포맷팅
@@ -248,6 +302,7 @@ def _search_similar_risk_sentences(sentence: str) -> List[Dict[str, Any]]:
 def _generate_test_evidence(sentence: str) -> List[Dict[str, Any]]:
     """
     ChromaDB가 없을 때 테스트용 증거 데이터를 생성합니다.
+    톤 분석과 대안 제시 감지를 통해 더 정확한 증거를 생성합니다.
     
     Args:
         sentence (str): 분석할 문장
@@ -255,20 +310,64 @@ def _generate_test_evidence(sentence: str) -> List[Dict[str, Any]]:
     Returns:
         List[Dict[str, Any]]: 테스트 증거 리스트
     """
-    # 위험 키워드 매칭 테스트
-    risk_keywords = {
-        "탈퇴": ["탈퇴할까 생각중입니다 진짜로 더 이상 의미가 없는 것 같아요", 0.87, 0.85],
-        "그만": ["이 서비스 그만 쓸까 봐요 다른 곳으로 옮기는 게 나을 것 같아서", 0.79, 0.82],
-        "떠날": ["여기 더 있어야 할 이유가 없다고 생각해요 떠날 때가 된 것 같습니다", 0.83, 0.78],
-        "삭제": ["계정 삭제하고 싶은데 어떻게 하나요? 더 이상 사용할 일이 없을 것 같아요", 0.75, 0.80],
-        "그만둘": ["이제 정말 그만둘 때가 된 것 같습니다 다른 대안을 찾아보고 있어요", 0.72, 0.75],
-        "사용하고 싶지 않": ["더 이상 이 서비스를 사용하고 싶지 않아요", 0.91, 0.88],
-        "별로": ["서비스 품질이 너무 떨어져서 이탈을 고려하고 있습니다", 0.68, 0.65],
-        "아쉬워": ["서비스가 좀 아쉬워요 개선이 필요할 것 같습니다", 0.60, 0.55]
-    }
-    
     evidence_list = []
     sentence_lower = sentence.lower()
+    
+    # 🎯 톤 분석: 농담/장난 감지
+    joke_indicators = ['ㅋ', 'ㅎ', '~', '구라', '방구', '뿡', '헤헤', '호호', '장난', 'ㄱㅇㄹㅇ']
+    is_joking = any(indicator in sentence for indicator in joke_indicators)
+    
+    # 🎯 대안 제시 감지 (강력한 이탈 신호)
+    alternative_keywords = ['다른 곳', '아니어도', '많아요', '다른 데', '옮길', '이동할', '떠날']
+    has_alternative = any(keyword in sentence_lower for keyword in alternative_keywords)
+    
+    # 🎯 실망/불만 표현 감지
+    disappointment_keywords = ['실망', '어이없', '안해주', '왜 안', '진짜', '정말', '아니']
+    is_disappointed = any(keyword in sentence_lower for keyword in disappointment_keywords)
+    
+    # 대안 제시가 있으면 높은 위험도 증거 추가 (우선순위 최상)
+    if has_alternative:
+        evidence_list.append({
+            "risk_score": 0.88,
+            "matched_score": 0.92,
+            "matched_sentence": "여기가 아니어도 활동할 곳은 많습니다. 다른 커뮤니티로 옮기려고요.",
+            "matched_post_id": "demo_post_alternative",
+            "matched_created_at": "2024-10-31T14:00:00",
+            "matched_user_id": "demo_user_alt",
+            "vector_chunk_id": "test_alternative"
+        })
+    
+    # 실망 + 대안 조합은 더 높은 위험
+    if is_disappointed and has_alternative:
+        evidence_list.append({
+            "risk_score": 0.91,
+            "matched_score": 0.90,
+            "matched_sentence": "진짜 실망했어요. 다른 곳으로 갈래요.",
+            "matched_post_id": "demo_post_disappointed_alt",
+            "matched_created_at": "2024-10-31T14:15:00",
+            "matched_user_id": "demo_user_disappointed",
+            "vector_chunk_id": "test_disappointed_alt"
+        })
+    
+    # 농담 톤이면 위험도 낮은 키워드로 매칭
+    if is_joking:
+        risk_keywords = {
+            "탈퇴": ["탈퇴한다고 농담했어요 ㅋㅋ 사실 재미있어요", 0.18, 0.35],
+            "그만": ["그만둔다고 장난쳤어요~ 계속 쓸 거예요", 0.22, 0.38],
+            "떠날": ["떠난다고 했지만 농담이에요 ㅎㅎ", 0.20, 0.33],
+        }
+    else:
+        # 진지한 톤일 때는 원래 위험도 유지
+        risk_keywords = {
+            "탈퇴": ["탈퇴할까 생각중입니다 진짜로 더 이상 의미가 없는 것 같아요", 0.87, 0.85],
+            "그만": ["이 서비스 그만 쓸까 봐요 다른 곳으로 옮기는 게 나을 것 같아서", 0.79, 0.82],
+            "떠날": ["여기 더 있어야 할 이유가 없다고 생각해요 떠날 때가 된 것 같습니다", 0.83, 0.78],
+            "삭제": ["계정 삭제하고 싶은데 어떻게 하나요? 더 이상 사용할 일이 없을 것 같아요", 0.75, 0.80],
+            "그만둘": ["이제 정말 그만둘 때가 된 것 같습니다 다른 대안을 찾아보고 있어요", 0.72, 0.75],
+            "사용하고 싶지 않": ["더 이상 이 서비스를 사용하고 싶지 않아요", 0.91, 0.88],
+            "별로": ["서비스 품질이 너무 떨어져서 이탈을 고려하고 있습니다", 0.68, 0.65],
+            "아쉬워": ["서비스가 좀 아쉬워요 개선이 필요할 것 같습니다", 0.60, 0.55]
+        }
     
     # 키워드 매칭으로 유사 문장 찾기
     for keyword, (matched_sentence, risk_score, similarity) in risk_keywords.items():
@@ -284,23 +383,24 @@ def _generate_test_evidence(sentence: str) -> List[Dict[str, Any]]:
             }
             evidence_list.append(evidence)
     
-    # 문장 길이와 내용에 따른 추가 매칭
-    if len(sentence) > 20 and any(word in sentence_lower for word in ["안", "못", "어려워", "힘들어"]):
-        evidence_list.append({
-            "risk_score": 0.55,
-            "matched_score": 0.60,
-            "matched_sentence": "서비스 이용이 어려워서 다른 곳을 알아보고 있어요",
-            "matched_post_id": "demo_post_difficulty",
-            "matched_created_at": "2024-10-31T12:30:00",
-            "matched_user_id": "demo_user_difficulty",
-            "vector_chunk_id": "test_difficulty"
-        })
+    # 불만 표현 감지 (진지한 톤일 때만)
+    if not is_joking and len(sentence) > 20:
+        if any(word in sentence_lower for word in ["안", "못", "어려워", "힘들어"]):
+            evidence_list.append({
+                "risk_score": 0.55,
+                "matched_score": 0.60,
+                "matched_sentence": "서비스 이용이 어려워서 다른 곳을 알아보고 있어요",
+                "matched_post_id": "demo_post_difficulty",
+                "matched_created_at": "2024-10-31T12:30:00",
+                "matched_user_id": "demo_user_difficulty",
+                "vector_chunk_id": "test_difficulty"
+            })
     
     # 유사도 기준으로 정렬 (높은 순)
     evidence_list.sort(key=lambda x: x['matched_score'], reverse=True)
     
-    # 최대 3개까지만 반환
-    return evidence_list[:3]
+    # 최대 5개까지 반환 (더 많은 증거 제공)
+    return evidence_list[:5]
 
 
 def _deduplicate_and_sort_evidence(evidence_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -426,7 +526,8 @@ def _create_safe_decision() -> Dict[str, Any]:
             "정상 모니터링 유지",
             "추가 조치 불필요"
         ],
-        "evidence_ids": []
+        "evidence_ids": [],
+        "confidence": "Uncertain"
     }
 
 

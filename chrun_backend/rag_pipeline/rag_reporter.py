@@ -14,6 +14,13 @@ from .risk_scorer import RiskScorer, THRESHOLD
 from .vector_store import get_vector_store
 from .embedding_service import get_embedding
 from .high_risk_store import get_recent_high_risk
+from .report_schema import (
+    create_report_schema,
+    validate_report_schema,
+    format_evidence_from_similar_patterns,
+    PROMPT_VERSION,
+    DEFAULT_MODEL
+)
 
 
 def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -148,7 +155,7 @@ class RAGReporter:
             if s.get('risk_score', 0.0) >= THRESHOLD
         ]
         
-        # 4. 각 고위험 문장에 대해 유사한 패턴 검색
+        # 4. 각 고위험 문장에 대해 벡터DB Top-k 검색
         similar_patterns = []
         for sentence_data in high_risk_sentences:
             sentence = sentence_data.get('sentence', '')
@@ -157,13 +164,10 @@ class RAGReporter:
             try:
                 embedding = get_embedding(sentence)
                 
-                # high_risk_store에서 confirmed=true인 항목들과 유사도 비교
-                confirmed_chunks = self._get_confirmed_high_risk_chunks()
-                
-                # 유사한 문장들 찾기
+                # 벡터DB에서 Top-k 검색 (전수 비교 대신)
                 similar_chunks = self._find_similar_chunks(
                     query_embedding=embedding,
-                    candidate_chunks=confirmed_chunks,
+                    candidate_chunks=[],  # 사용하지 않음 (하위 호환성)
                     top_k=3,
                     similarity_threshold=0.7
                 )
@@ -179,13 +183,14 @@ class RAGReporter:
                 print(f"[WARN] 유사도 검색 실패 (문장: {sentence[:50]}...): {e}")
                 continue
         
-        # 5. 보고서 생성
-        report = self._generate_report_content(
+        # 5. LLM 기반 보고서 생성 (새 텍스트 + evidence)
+        report = self._generate_llm_report(
+            new_post_text=new_post_text,
             user_id=user_id,
             post_id=post_id,
-            scored_sentences=scored_sentences,
             high_risk_sentences=high_risk_sentences,
             similar_patterns=similar_patterns,
+            scored_sentences=scored_sentences,
             created_at=created_at
         )
         
@@ -226,51 +231,51 @@ class RAGReporter:
         similarity_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
         """
-        쿼리 임베딩과 유사한 청크들을 찾기
+        쿼리 임베딩과 유사한 청크들을 벡터DB Top-k 검색으로 찾기
         
         Args:
             query_embedding (List[float]): 쿼리 문장의 임베딩
-            candidate_chunks (List[Dict]): 후보 청크들
+            candidate_chunks (List[Dict]): 후보 청크들 (사용하지 않음, 하위 호환성 유지)
             top_k (int): 반환할 최대 개수
             similarity_threshold (float): 유사도 임계값
             
         Returns:
             List[Dict[str, Any]]: 유사한 청크들 (유사도 순으로 정렬)
         """
-        if not candidate_chunks:
-            return []
+        try:
+            # 벡터DB에서 Top-k 검색 (confirmed=true인 항목만)
+            similar_results = self.vector_store.search_similar_chunks(
+                embedding=query_embedding,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+                confirmed_only=True  # 확정된 항목만 검색
+            )
             
-        similarities = []
-        
-        for chunk in candidate_chunks:
-            sentence = chunk.get('sentence', '')
-            if not sentence:
-                continue
-                
-            try:
-                # 후보 문장의 임베딩 생성
-                candidate_embedding = get_embedding(sentence)
-                
-                # 코사인 유사도 계산
-                similarity = calculate_cosine_similarity(query_embedding, candidate_embedding)
-                
-                # 임계값 이상인 경우만 포함
-                if similarity >= similarity_threshold:
-                    chunk_with_similarity = chunk.copy()
-                    chunk_with_similarity['similarity_score'] = similarity
-                    similarities.append(chunk_with_similarity)
-                    
-            except Exception as e:
-                print(f"[WARN] 임베딩 생성 실패 (문장: {sentence[:30]}...): {e}")
-                continue
-        
-        # 유사도 순으로 정렬하고 상위 k개 반환
-        similarities.sort(key=lambda x: x.get('similarity_score', 0.0), reverse=True)
-        
-        result = similarities[:top_k]
-        print(f"[INFO] 유사한 문장 {len(result)}개 발견 (임계값: {similarity_threshold})")
-        
-        return result
+            # 결과 포맷팅 (기존 형식과 호환)
+            formatted_results = []
+            for result in similar_results:
+                formatted_result = {
+                    'sentence': result.get('sentence', ''),
+                    'user_id': result.get('user_id', ''),
+                    'post_id': result.get('post_id', ''),
+                    'risk_score': result.get('risk_score', 0.0),
+                    'similarity_score': result.get('similarity_score', 0.0),
+                    'created_at': result.get('created_at', ''),
+                    'chunk_id': result.get('chunk_id', ''),
+                    'confirmed': result.get('confirmed', False),
+                    'segment': result.get('segment'),
+                    'reason': result.get('reason')
+                }
+                formatted_results.append(formatted_result)
+            
+            print(f"[INFO] 벡터DB Top-{top_k} 검색 완료: {len(formatted_results)}개 발견 (임계값: {similarity_threshold})")
+            return formatted_results
+            
+        except Exception as e:
+            print(f"[ERROR] 벡터DB 검색 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
     
     def _get_embedding(self, sentence: str) -> List[float]:
         """
@@ -293,6 +298,302 @@ class RAGReporter:
             # fallback: 768차원 랜덤 벡터
             embedding_dim = 768
             return [random.uniform(-1.0, 1.0) for _ in range(embedding_dim)]
+    
+    def _generate_llm_report(
+        self,
+        new_post_text: str,
+        user_id: str,
+        post_id: str,
+        high_risk_sentences: List[Dict[str, Any]],
+        similar_patterns: List[Dict[str, Any]],
+        scored_sentences: List[Dict[str, Any]],
+        created_at: datetime
+    ) -> Dict[str, Any]:
+        """
+        LLM을 사용하여 보고서 생성 (새 텍스트 + evidence)
+        
+        Args:
+            new_post_text (str): 새로운 게시글 텍스트
+            user_id (str): 사용자 ID
+            post_id (str): 게시글 ID
+            high_risk_sentences (List[Dict]): 고위험 문장들
+            similar_patterns (List[Dict]): 유사 패턴들
+            scored_sentences (List[Dict]): 점수가 계산된 모든 문장들
+            created_at (datetime): 작성 시간
+            
+        Returns:
+            Dict[str, Any]: 공통 스키마 형식의 보고서
+        """
+        # evidence 형식으로 변환
+        evidence_list = format_evidence_from_similar_patterns(similar_patterns)
+        
+        # LLM 호출 시도
+        try:
+            llm_result = self._call_llm_for_report(
+                new_post_text=new_post_text,
+                high_risk_sentences=high_risk_sentences,
+                evidence_list=evidence_list
+            )
+            
+            if llm_result:
+                # LLM 결과를 공통 스키마로 변환
+                return create_report_schema(
+                    summary=llm_result.get("summary", ""),
+                    risk_level=llm_result.get("risk_level", "medium"),
+                    evidence=evidence_list,
+                    actions=llm_result.get("actions", []),
+                    model=llm_result.get("model", DEFAULT_MODEL),
+                    prompt_v=llm_result.get("prompt_v", PROMPT_VERSION),
+                    warnings=llm_result.get("warnings")
+                )
+        except Exception as e:
+            print(f"[WARN] LLM 호출 실패, 폴백 사용: {e}")
+        
+        # 폴백: 규칙 기반 생성 (동일 스키마)
+        return self._generate_fallback_report(
+            user_id=user_id,
+            post_id=post_id,
+            scored_sentences=scored_sentences,
+            high_risk_sentences=high_risk_sentences,
+            similar_patterns=similar_patterns,
+            evidence_list=evidence_list,
+            created_at=created_at
+        )
+    
+    def _call_llm_for_report(
+        self,
+        new_post_text: str,
+        high_risk_sentences: List[Dict[str, Any]],
+        evidence_list: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        LLM을 호출하여 보고서 생성
+        
+        Args:
+            new_post_text (str): 새로운 게시글 텍스트
+            high_risk_sentences (List[Dict]): 고위험 문장들
+            evidence_list (List[Dict]): evidence 리스트
+            
+        Returns:
+            Optional[Dict[str, Any]]: LLM 응답 결과 (실패 시 None)
+        """
+        import os
+        import json
+        import time
+        
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("[WARN] OPENAI_API_KEY가 설정되지 않았습니다.")
+            return None
+        
+        try:
+            from openai import OpenAI
+        except ImportError:
+            print("[WARN] OpenAI 패키지가 설치되지 않았습니다.")
+            return None
+        
+        # 프롬프트 생성
+        system_prompt = self._create_llm_system_prompt()
+        user_prompt = self._create_llm_user_prompt(new_post_text, high_risk_sentences, evidence_list)
+        
+        client = OpenAI(api_key=api_key, timeout=30)
+        
+        # LLM 호출 (재시도 1회 포함)
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=800,
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+                
+                response_text = response.choices[0].message.content.strip()
+                
+                # JSON 파싱 시도
+                try:
+                    result = json.loads(response_text)
+                    
+                    # 스키마 검증
+                    is_valid, error_msg = validate_report_schema(result)
+                    if not is_valid:
+                        print(f"[WARN] 스키마 검증 실패: {error_msg}")
+                        if attempt < max_retries - 1:
+                            continue  # 재시도
+                        return None
+                    
+                    # 모델 및 프롬프트 버전 추가
+                    result["model"] = DEFAULT_MODEL
+                    result["prompt_v"] = PROMPT_VERSION
+                    
+                    # evidence 경고 확인
+                    if len(evidence_list) < 2:
+                        if "warnings" not in result:
+                            result["warnings"] = []
+                        result["warnings"].append(f"evidence가 {len(evidence_list)}건으로 부족합니다 (최소 2건 권장)")
+                    
+                    print(f"[INFO] LLM 보고서 생성 성공 (시도 {attempt + 1})")
+                    return result
+                    
+                except json.JSONDecodeError as e:
+                    print(f"[WARN] JSON 파싱 실패 (시도 {attempt + 1}): {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)  # 짧은 대기 후 재시도
+                        continue
+                    return None
+                    
+            except Exception as e:
+                print(f"[WARN] LLM 호출 실패 (시도 {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1)  # 재시도 전 대기
+                    continue
+                return None
+        
+        return None
+    
+    def _create_llm_system_prompt(self) -> str:
+        """LLM 시스템 프롬프트 생성"""
+        return """너는 커뮤니티 이탈 징후 분석 전문가다.
+
+주어진 새로운 게시글과 유사한 과거 사례(evidence)를 분석하여:
+1. 요약(summary): 위험 상황을 간결하게 요약
+2. 위험 수준(risk_level): "low", "medium", "high" 중 하나
+3. 조치사항(actions): 구체적이고 실행 가능한 조치사항 3개 이상
+
+반드시 다음 JSON 스키마로만 응답하라:
+{
+  "summary": "string",
+  "risk_level": "low|medium|high",
+  "actions": ["string", "string", "string"]
+}
+
+설명이나 주석은 절대 포함하지 않는다."""
+    
+    def _create_llm_user_prompt(
+        self,
+        new_post_text: str,
+        high_risk_sentences: List[Dict[str, Any]],
+        evidence_list: List[Dict[str, Any]]
+    ) -> str:
+        """LLM 사용자 프롬프트 생성"""
+        # 고위험 문장 요약
+        risk_sentences_text = "\n".join([
+            f"- {s.get('sentence', '')[:100]}" 
+            for s in high_risk_sentences[:5]
+        ])
+        
+        # evidence 요약
+        evidence_text = "\n".join([
+            f"[{ev.get('id', 'N/A')}] 유사도 {ev.get('similarity', 0.0):.2f}: {ev.get('snippet', '')[:150]}"
+            for ev in evidence_list[:10]
+        ])
+        
+        return f"""새로운 게시글:
+{new_post_text[:500]}
+
+고위험 문장:
+{risk_sentences_text if risk_sentences_text else "(없음)"}
+
+유사한 과거 사례 (evidence):
+{evidence_text if evidence_text else "(없음)"}
+
+위 게시글을 분석하여 JSON 형식으로 응답하라."""
+    
+    def _generate_fallback_report(
+        self,
+        user_id: str,
+        post_id: str,
+        scored_sentences: List[Dict[str, Any]],
+        high_risk_sentences: List[Dict[str, Any]],
+        similar_patterns: List[Dict[str, Any]],
+        evidence_list: List[Dict[str, Any]],
+        created_at: datetime
+    ) -> Dict[str, Any]:
+        """
+        규칙 기반 폴백 보고서 생성 (동일 스키마)
+        
+        Args:
+            user_id (str): 사용자 ID
+            post_id (str): 게시글 ID
+            scored_sentences (List[Dict]): 점수가 계산된 모든 문장들
+            high_risk_sentences (List[Dict]): 고위험 문장들
+            similar_patterns (List[Dict]): 유사한 패턴들
+            evidence_list (List[Dict]): evidence 리스트
+            created_at (datetime): 작성 시간
+            
+        Returns:
+            Dict[str, Any]: 공통 스키마 형식의 보고서
+        """
+        # 전체 위험 점수 계산
+        if scored_sentences:
+            total_risk_score = sum(s.get('risk_score', 0.0) for s in scored_sentences)
+            avg_risk_score = total_risk_score / len(scored_sentences)
+        else:
+            avg_risk_score = 0.0
+        
+        # 위험 수준 결정
+        if avg_risk_score >= 0.7 or len(high_risk_sentences) >= 3:
+            risk_level = "high"
+        elif avg_risk_score >= 0.4 or len(high_risk_sentences) >= 1:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+        
+        # 요약 생성
+        if high_risk_sentences:
+            risk_factors = []
+            for sentence in high_risk_sentences:
+                risk_factors.extend(sentence.get('risk_factors', []))
+            
+            if any("그만둘" in f or "포기" in f for f in risk_factors):
+                summary = f"탈퇴 의도가 명시적으로 표현됨. 고위험 문장 {len(high_risk_sentences)}개 발견."
+            elif any("싫어" in f or "짜증" in f for f in risk_factors):
+                summary = f"강한 부정적 감정 표현. 고위험 문장 {len(high_risk_sentences)}개 발견."
+            else:
+                summary = f"이탈 위험 패턴 감지. 고위험 문장 {len(high_risk_sentences)}개 발견."
+        else:
+            summary = "위험 요소가 감지되지 않음."
+        
+        # 조치사항 생성
+        actions = []
+        if risk_level == "high":
+            actions = [
+                "즉시 1:1 DM으로 불만사항 확인 및 해결 방안 제시",
+                "고객 서비스팀 에스컬레이션 및 우선 처리",
+                "개인 맞춤 혜택 제공으로 이탈 방지"
+            ]
+        elif risk_level == "medium":
+            actions = [
+                "1:1 DM으로 서비스 이용 현황 확인",
+                "FAQ 또는 가이드 자료 제공",
+                "커뮤니티 매니저 모니터링 강화"
+            ]
+        else:
+            actions = [
+                "일반적인 고객 만족도 조사 진행",
+                "정기적인 서비스 개선 안내",
+                "커뮤니티 활동 독려"
+            ]
+        
+        # 경고 메시지
+        warnings = []
+        if len(evidence_list) < 2:
+            warnings.append(f"evidence가 {len(evidence_list)}건으로 부족합니다 (최소 2건 권장)")
+        
+        return create_report_schema(
+            summary=summary,
+            risk_level=risk_level,
+            evidence=evidence_list,
+            actions=actions,
+            model=DEFAULT_MODEL,
+            prompt_v=PROMPT_VERSION,
+            warnings=warnings if warnings else None
+        )
     
     def _generate_report_content(
         self,

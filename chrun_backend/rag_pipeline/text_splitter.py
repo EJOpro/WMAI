@@ -1,38 +1,75 @@
 """
-텍스트 분할기 모듈
-긴 텍스트를 문장 단위로 나누는 기능을 제공합니다.
+텍스트 분할기 모듈 (KSS + Fallback + 메타데이터 강화)
+
+KSS(Korean Sentence Splitter)를 우선 사용하고 실패 시 정규식으로 fallback하여
+한국어 커뮤니티 텍스트를 정확하게 문장 단위로 분할합니다.
+
+주요 개선사항:
+- KSS 통합: 구어체, 생략부호, 채팅체 처리 향상
+- 메타데이터 강화: 앞뒤 문장, 위치 정보 추가
+- 문맥 보존: 문장 독립성 문제 해결
 """
 
 import re
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class TextSplitter:
     """
-    텍스트를 문장 단위로 분할하는 클래스
+    KSS 기반 텍스트 분할기 (Fallback 지원)
+    
+    한국어 특화 문장 분리 + 메타데이터 강화로 RAG 성능 향상
     """
     
-    def __init__(self):
-        # 한국어 문장 분할을 위한 정규표현식 패턴
-        # 마침표, 물음표, 느낌표 뒤에 공백이나 줄바꿈이 오는 경우를 문장의 끝으로 판단
+    def __init__(self, use_kss: bool = True):
+        """
+        Args:
+            use_kss (bool): KSS 사용 여부 (기본값: True)
+        """
+        self.use_kss = use_kss
+        
+        # Fallback용 정규표현식 패턴 (기존 방식)
         self.sentence_pattern = re.compile(r'[.!?]+\s*(?=\s|$|\n)')
+        
+        # KSS 초기화
+        if self.use_kss:
+            try:
+                import kss
+                self.kss = kss
+                self.kss_available = True
+                logger.info("KSS 초기화 완료 - 한국어 특화 문장 분리 활성화")
+            except ImportError:
+                logger.warning("KSS가 설치되지 않았습니다. 정규식 fallback을 사용합니다.")
+                self.kss_available = False
+        else:
+            self.kss_available = False
+            logger.info("정규식 기반 문장 분리 사용")
         
     def split_text(
         self, 
         text: str, 
         user_id: Optional[str] = None, 
         post_id: Optional[str] = None,
-        created_at: Optional[datetime] = None
+        created_at: Optional[datetime] = None,
+        user_context: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        텍스트를 문장 단위로 분할하여 메타데이터와 함께 반환
+        텍스트를 문장 단위로 분할하여 강화된 메타데이터와 함께 반환
         
         Args:
             text (str): 분할할 원문 텍스트
             user_id (str, optional): 사용자 ID
             post_id (str, optional): 게시글 ID  
             created_at (datetime, optional): 생성 시간
+            user_context (dict, optional): 사용자 컨텍스트 정보
+                - activity_trend: 활동 추이 (예: "증가", "감소")
+                - prev_posts_count: 이전 게시글 수
+                - join_date: 가입일
+                - recent_activity_score: 최근 활동 점수
             
         Returns:
             List[Dict[str, Any]]: 문장별 딕셔너리 리스트
@@ -42,6 +79,19 @@ class TextSplitter:
                 - post_id: 게시글 ID
                 - created_at: 생성 시간
                 - sentence_index: 문장 순서 (0부터 시작)
+                
+                ⭐ 추가 메타데이터 (문맥 정보):
+                - prev_sentence: 이전 문장 내용
+                - next_sentence: 다음 문장 내용
+                - total_sentences: 전체 문장 수
+                - is_first: 첫 문장 여부
+                - is_last: 마지막 문장 여부
+                - splitter_method: 분할 방법 ("kss" 또는 "regex")
+                
+                ⭐ 사용자 컨텍스트 (선택적):
+                - user_activity_trend: 사용자 활동 추이
+                - user_prev_posts_count: 이전 게시글 수
+                - user_join_date: 가입일
         """
         if not text or not text.strip():
             return []
@@ -53,30 +103,57 @@ class TextSplitter:
         # 텍스트 전처리: 연속된 공백 제거, 줄바꿈 정리
         cleaned_text = re.sub(r'\s+', ' ', text.strip())
         
-        # 문장 분할
+        # 문장 분할 (KSS 우선, 실패 시 정규식)
         sentences = self._split_sentences(cleaned_text)
+        splitter_method = "kss" if self.kss_available else "regex"
         
         # 결과 리스트 생성
         result = []
+        total_sentences = len(sentences)
+        
         for i, sentence in enumerate(sentences):
             # 빈 문장이나 너무 짧은 문장 제외 (2글자 이하)
             if len(sentence.strip()) <= 2:
                 continue
-                
+            
+            # 기본 메타데이터
             sentence_dict = {
+                # 기본 정보
                 "sentence": sentence.strip(),
                 "user_id": user_id,
                 "post_id": post_id,
                 "created_at": created_at,
-                "sentence_index": i
+                "sentence_index": i,
+                
+                # ⭐ 문맥 정보 (문장 독립성 해결)
+                "prev_sentence": sentences[i-1].strip() if i > 0 else "",
+                "next_sentence": sentences[i+1].strip() if i < total_sentences-1 else "",
+                "total_sentences": total_sentences,
+                "is_first": (i == 0),
+                "is_last": (i == total_sentences-1),
+                
+                # 분할 방법 기록
+                "splitter_method": splitter_method
             }
+            
+            # ⭐ 사용자 컨텍스트 추가 (선택적)
+            if user_context:
+                if "activity_trend" in user_context:
+                    sentence_dict["user_activity_trend"] = user_context["activity_trend"]
+                if "prev_posts_count" in user_context:
+                    sentence_dict["user_prev_posts_count"] = user_context["prev_posts_count"]
+                if "join_date" in user_context:
+                    sentence_dict["user_join_date"] = user_context["join_date"]
+                if "recent_activity_score" in user_context:
+                    sentence_dict["user_recent_activity_score"] = user_context["recent_activity_score"]
+            
             result.append(sentence_dict)
             
         return result
     
     def _split_sentences(self, text: str) -> List[str]:
         """
-        실제 문장 분할 로직
+        실제 문장 분할 로직 (KSS 우선, 실패 시 정규식 Fallback)
         
         Args:
             text (str): 분할할 텍스트
@@ -84,22 +161,43 @@ class TextSplitter:
         Returns:
             List[str]: 분할된 문장 리스트
         """
-        # 정규표현식으로 문장 분할
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # 1단계: KSS 시도 (한국어 특화)
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if self.kss_available:
+            try:
+                # KSS 6.0+ 간단한 API 사용
+                sentences = self.kss.split_sentences(text)
+                
+                # 빈 문장 제거
+                sentences = [s.strip() for s in sentences if s.strip()]
+                
+                if sentences:  # 성공
+                    logger.debug(f"KSS로 {len(sentences)}개 문장 분할 완료")
+                    return sentences
+                    
+            except Exception as e:
+                logger.warning(f"KSS 분할 실패, 정규식 fallback 사용: {e}")
+        
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # 2단계: Fallback - 정규식 방식
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         sentences = self.sentence_pattern.split(text)
         
         # 빈 문자열 제거 및 공백 정리
         sentences = [s.strip() for s in sentences if s.strip()]
         
-        # 문장 부호가 제거된 경우를 위한 후처리
+        # 문장 부호 후처리
         processed_sentences = []
         for sentence in sentences:
             # 문장이 문장부호로 끝나지 않는 경우 마침표 추가
             if sentence and not sentence[-1] in '.!?':
-                # 단, 마지막 문장이거나 명백히 완결된 문장인 경우만
-                if len(sentence) > 10:  # 10글자 이상인 경우만 마침표 추가
+                # 10글자 이상인 경우만 마침표 추가
+                if len(sentence) > 10:
                     sentence += '.'
             processed_sentences.append(sentence)
-            
+        
+        logger.debug(f"정규식으로 {len(processed_sentences)}개 문장 분할 완료")
         return processed_sentences
     
     def split_multiple_texts(
@@ -140,24 +238,31 @@ class TextSplitter:
         return all_sentences
 
 
-# 편의를 위한 함수형 인터페이스
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 편의 함수 (Backward Compatibility)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 def split_text_to_sentences(
     text: str, 
     user_id: Optional[str] = None, 
     post_id: Optional[str] = None,
-    created_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None,
+    use_kss: bool = True,
+    user_context: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
     """
-    텍스트를 문장 단위로 분할하는 편의 함수
+    텍스트를 문장 단위로 분할하는 편의 함수 (KSS + 메타데이터 강화)
     
     Args:
         text (str): 분할할 원문 텍스트
         user_id (str, optional): 사용자 ID
         post_id (str, optional): 게시글 ID
         created_at (datetime, optional): 생성 시간
+        use_kss (bool): KSS 사용 여부 (기본값: True)
+        user_context (dict, optional): 사용자 컨텍스트 정보
         
     Returns:
-        List[Dict[str, Any]]: 문장별 딕셔너리 리스트
+        List[Dict[str, Any]]: 강화된 메타데이터를 포함한 문장 리스트
     """
-    splitter = TextSplitter()
-    return splitter.split_text(text, user_id, post_id, created_at)
+    splitter = TextSplitter(use_kss=use_kss)
+    return splitter.split_text(text, user_id, post_id, created_at, user_context)

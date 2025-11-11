@@ -26,6 +26,13 @@ from .chrun_database import get_db, engine, init_db
 from .chrun_models import Event, User, ChurnAnalysis, Base
 from .chrun_schemas import EventCreate, ChurnMetrics, SegmentAnalysis
 from .chrun_analytics import ChurnAnalyzer
+from .cache_utils import (
+    calculate_dataset_hash,
+    generate_cache_key,
+    log_cache_hit,
+    log_cache_miss,
+    log_cache_invalidate
+)
 
 from fastapi import APIRouter
 
@@ -87,8 +94,16 @@ def _collect_cache_keys(patterns: Iterable[str]) -> List[str]:
     return keys
 
 
-def invalidate_cache(patterns: Optional[List[str]] = None) -> int:
-    """패턴 목록에 해당하는 캐시 키를 삭제하고 삭제된 키 수를 반환"""
+def invalidate_cache(patterns: Optional[List[str]] = None, reason: Optional[str] = None) -> int:
+    """패턴 목록에 해당하는 캐시 키를 삭제하고 삭제된 키 수를 반환
+    
+    Args:
+        patterns: 삭제할 캐시 패턴 목록 (None이면 기본 패턴 사용)
+        reason: 무효화 이유 (로그용)
+    
+    Returns:
+        삭제된 키 수
+    """
     
     if not redis_client:
         return 0
@@ -100,6 +115,13 @@ def invalidate_cache(patterns: Optional[List[str]] = None) -> int:
 
     if keys:
         redis_client.delete(*keys)
+        # 구조화된 로그 출력
+        for pattern in patterns:
+            log_cache_invalidate(
+                pattern=pattern,
+                deleted_count=len(keys),
+                reason=reason or "manual_invalidation"
+            )
 
     return len(keys)
 
@@ -199,8 +221,8 @@ async def clear_events(db: Session = Depends(get_db)):
         
         db.commit()
         
-        # 캐시 무효화
-        invalidate_cache()
+        # 캐시 무효화 (데이터 삭제로 인한 무효화)
+        invalidate_cache(reason="data_deletion")
         
         return {"message": "모든 이벤트 데이터가 삭제되었습니다."}
     
@@ -220,8 +242,8 @@ async def upload_events(events: List[EventCreate], db: Session = Depends(get_db)
         db.bulk_save_objects(db_events)
         db.commit()
         
-        # 캐시 무효화 - 모든 관련 캐시 삭제
-        invalidate_cache()
+        # 캐시 무효화 - 모든 관련 캐시 삭제 (데이터 변경으로 인한 무효화)
+        invalidate_cache(reason="data_upload")
         
         return {"message": f"{len(events)}개 이벤트가 업로드되었습니다."}
     
@@ -237,19 +259,40 @@ async def run_analysis(
 ):
     """이탈 분석 실행"""
     
-    # 캐시 키 생성 (세그먼트 설정과 threshold도 포함)
-    segments_key = "_".join([f"{k}:{v}" for k, v in sorted(request.segments.items())])
-    inactivity_key = "_".join(map(str, sorted(request.inactivity_days)))
-    cache_key = f"churn_analysis:{request.start_month}:{request.end_month}:{segments_key}:{inactivity_key}:{request.threshold}"
+    # 데이터셋 해시 계산 (데이터 변경 감지)
+    dataset_hash = calculate_dataset_hash(db)
+    
+    # LLM 모델 및 프롬프트 버전 (LLM 서비스에서 가져오기)
+    from .chrun_llm_service import LLMInsightGenerator
+    llm_service = LLMInsightGenerator()
+    model = llm_service.model
+    prompt_v = llm_service.prompt_version
+    
+    # 캐시 키 생성 (모든 분석 입력 반영)
+    cache_key = generate_cache_key(
+        dataset_hash=dataset_hash,
+        start_month=request.start_month,
+        end_month=request.end_month,
+        segments=request.segments,
+        threshold=request.threshold,
+        model=model,
+        prompt_v=prompt_v
+    )
     
     # 캐시된 결과 확인 (Redis가 있을 때만)
     if redis_client:
         try:
             cached_result = redis_client.get(cache_key)
             if cached_result:
+                # 캐시 히트 로그
+                log_cache_hit(cache_key, dataset_hash)
                 return json.loads(cached_result)
         except Exception as e:
             print(f"⚠️ Redis 캐시 읽기 실패: {e}")
+            log_cache_miss(cache_key, dataset_hash, reason=f"redis_error: {str(e)}")
+    else:
+        # Redis가 없으면 캐시 미스
+        log_cache_miss(cache_key, dataset_hash, reason="redis_unavailable")
     
     try:
         # 분석 실행
@@ -266,6 +309,8 @@ async def run_analysis(
         if redis_client:
             try:
                 redis_client.setex(cache_key, 3600, json.dumps(result, default=str))
+                # 캐시 저장 로그 (미스 후 저장)
+                log_cache_miss(cache_key, dataset_hash, reason="cache_miss_new_data")
             except Exception as e:
                 print(f"⚠️ Redis 캐시 쓰기 실패: {e}")
         
@@ -505,18 +550,193 @@ async def get_verification_report(
 async def clear_cache():
     """캐시 전체 삭제"""
     try:
-        deleted_count = invalidate_cache()
+        deleted_count = invalidate_cache(reason="manual_clear")
         
         return {"message": f"{deleted_count}개 캐시 키가 삭제되었습니다."}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/analysis/results/{analysis_id}")
+async def get_analysis_result(
+    analysis_id: int,
+    db: Session = Depends(get_db)
+):
+    """저장된 분석 결과 조회 (세그먼트 분석 결과 포함)"""
+    try:
+        analysis = db.query(ChurnAnalysis).filter(ChurnAnalysis.id == analysis_id).first()
+        
+        if not analysis:
+            raise HTTPException(status_code=404, detail="분석 결과를 찾을 수 없습니다")
+        
+        # results JSON 파싱
+        if analysis.results:
+            result_data = json.loads(analysis.results)
+            
+            # 세그먼트 분석 결과 추출
+            segments = result_data.get('segments', {})
+            
+            return {
+                "id": analysis.id,
+                "analysis_date": analysis.analysis_date.isoformat() if analysis.analysis_date else None,
+                "start_month": analysis.start_month,
+                "end_month": analysis.end_month,
+                "total_churn_rate": analysis.total_churn_rate,
+                "active_users": analysis.active_users,
+                "churned_users": analysis.churned_users,
+                "reactivated_users": analysis.reactivated_users,
+                "long_term_inactive": analysis.long_term_inactive,
+                "segments": segments,  # 세그먼트 분석 결과 포함
+                "metrics": result_data.get('metrics', {}),
+                "trends": result_data.get('trends', {}),
+                "insights": result_data.get('insights', []),
+                "actions": result_data.get('actions', []),
+                "execution_time_seconds": analysis.execution_time_seconds,
+                "status": analysis.status
+            }
+        else:
+            return {
+                "id": analysis.id,
+                "analysis_date": analysis.analysis_date.isoformat() if analysis.analysis_date else None,
+                "start_month": analysis.start_month,
+                "end_month": analysis.end_month,
+                "total_churn_rate": analysis.total_churn_rate,
+                "active_users": analysis.active_users,
+                "segments": {},  # 빈 세그먼트 결과
+                "error": "분석 결과 데이터가 없습니다"
+            }
+            
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"결과 데이터 파싱 실패: {str(e)}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"분석 결과 조회 실패: {str(e)}")
+
+@router.get("/analysis/results")
+async def list_analysis_results(
+    start_month: Optional[str] = None,
+    end_month: Optional[str] = None,
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    """저장된 분석 결과 목록 조회"""
+    try:
+        query = db.query(ChurnAnalysis)
+        
+        if start_month:
+            query = query.filter(ChurnAnalysis.start_month >= start_month)
+        if end_month:
+            query = query.filter(ChurnAnalysis.end_month <= end_month)
+        
+        analyses = query.order_by(ChurnAnalysis.analysis_date.desc()).limit(limit).all()
+        
+        results = []
+        for analysis in analyses:
+            # results JSON에서 세그먼트 정보 추출
+            segments_summary = {}
+            if analysis.results:
+                try:
+                    result_data = json.loads(analysis.results)
+                    segments = result_data.get('segments', {})
+                    # 세그먼트 타입별 개수 요약
+                    for seg_type, seg_data in segments.items():
+                        if isinstance(seg_data, list):
+                            segments_summary[seg_type] = len(seg_data)
+                        else:
+                            segments_summary[seg_type] = 1 if seg_data else 0
+                except:
+                    pass
+            
+            results.append({
+                "id": analysis.id,
+                "analysis_date": analysis.analysis_date.isoformat() if analysis.analysis_date else None,
+                "start_month": analysis.start_month,
+                "end_month": analysis.end_month,
+                "total_churn_rate": analysis.total_churn_rate,
+                "active_users": analysis.active_users,
+                "has_segments": len(segments_summary) > 0,  # 세그먼트 분석 여부
+                "segments_summary": segments_summary,  # 세그먼트 요약
+                "status": analysis.status,
+                "execution_time_seconds": analysis.execution_time_seconds
+            })
+        
+        return {
+            "total": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"분석 결과 목록 조회 실패: {str(e)}")
+
+@app.get("/api/churn/analysis/monthly")
+async def get_monthly_churned_users(month: str, db: Session = Depends(get_db)):
+    """
+    특정 월의 이탈자 목록 반환
+    
+    Args:
+        month: 분석 월 (YYYY-MM 형식)
+    
+    Returns:
+        이탈자 user_hash 목록 및 메트릭
+    """
+    try:
+        analyzer = ChurnAnalyzer(db)
+        
+        # 월별 메트릭 계산
+        metrics = analyzer.get_monthly_metrics(month)
+        
+        # 상세 검증 리포트에서 이탈자 목록 추출
+        verification = analyzer.get_detailed_verification_report(month)
+        churned_users = verification.get("user_lists", {}).get("churned_users", [])
+        
+        return {
+            "success": True,
+            "month": month,
+            "churned_count": len(churned_users),
+            "churned_users": churned_users[:50],  # 최대 50명
+            "metrics": {
+                "churn_rate": metrics.get("churn_rate", 0),
+                "active_users": metrics.get("active_users", 0),
+                "previous_active_users": metrics.get("previous_active_users", 0),
+                "churned_users": metrics.get("churned_users", 0),
+                "retained_users": metrics.get("retained_users", 0)
+            }
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"이탈자 목록 조회 실패: {str(e)}"
+        )
+
 async def save_analysis_result(result: dict, db: Session):
     """분석 결과를 DB에 저장 (백그라운드 작업)"""
     try:
         config = result.get('config', {})
         metrics = result.get('metrics', {})
+        segments = result.get('segments', {})  # 세그먼트 분석 결과 확인
+        
+        # 세그먼트 분석 결과가 있는지 로그 출력
+        if segments:
+            segment_types = list(segments.keys())
+            print(f"[INFO] 세그먼트 분석 결과 저장: {segment_types}")
+            for seg_type, seg_data in segments.items():
+                if isinstance(seg_data, list):
+                    print(f"  - {seg_type}: {len(seg_data)}개 세그먼트")
+                else:
+                    print(f"  - {seg_type}: {type(seg_data).__name__}")
+        else:
+            print("[WARNING] 세그먼트 분석 결과가 없습니다!")
+        
+        # 전체 결과를 JSON으로 직렬화 (LONGTEXT로 저장 가능)
+        results_json = json.dumps(result, default=str, ensure_ascii=False)
+        results_size = len(results_json.encode('utf-8'))
+        print(f"[INFO] 저장할 결과 데이터 크기: {results_size:,} bytes ({results_size/1024:.1f} KB)")
         
         analysis_record = ChurnAnalysis(
             analysis_date=datetime.now(),
@@ -524,15 +744,22 @@ async def save_analysis_result(result: dict, db: Session):
             end_month=config.get('end_month'),
             total_churn_rate=metrics.get('churn_rate'),
             active_users=metrics.get('active_users'),
-            analysis_config=json.dumps(config),
-            results=json.dumps(result)
+            churned_users=metrics.get('churned_users'),
+            reactivated_users=metrics.get('reactivated_users'),
+            long_term_inactive=metrics.get('long_term_inactive'),
+            analysis_config=json.dumps(config, ensure_ascii=False),
+            results=results_json,  # 전체 result에 segments 포함됨 (LONGTEXT)
+            execution_time_seconds=result.get('execution_time_seconds')
         )
         
         db.add(analysis_record)
         db.commit()
+        print(f"[INFO] 분석 결과 저장 완료 (ID: {analysis_record.id}, 세그먼트 포함)")
         
     except Exception as e:
-        print(f"분석 결과 저장 실패: {e}")
+        print(f"[ERROR] 분석 결과 저장 실패: {e}")
+        import traceback
+        traceback.print_exc()
         db.rollback()
 
 if __name__ == "__main__":

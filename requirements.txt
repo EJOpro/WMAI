@@ -35,3 +35,6 @@ python-dateutil>=2.8.2
 # 벡터 데이터베이스
 chromadb>=0.4.24
 
+# 한국어 문장 분리
+kss>=6.0.0
+

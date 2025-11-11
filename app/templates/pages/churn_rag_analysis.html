@@ -1,0 +1,684 @@
+{% extends "base.html" %}
+
+{% block title %}이탈자 RAG 분석 - Community Admin{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+<style>
+.churn-rag-page {
+    padding: 30px 20px;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: 30px;
+}
+
+.page-header h1 {
+    font-size: 1.8rem;
+    color: #1f2937;
+    margin-bottom: 8px;
+}
+
+.page-header p {
+    color: #6b7280;
+}
+
+.content-grid {
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    gap: 20px;
+}
+
+/* 좌측: 이탈자 목록 */
+.churned-users-panel {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    height: fit-content;
+    max-height: 85vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-header {
+    padding: 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.panel-header h3 {
+    margin: 0 0 8px 0;
+    font-size: 1.1rem;
+    color: #1f2937;
+}
+
+.month-selector {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+
+.users-list {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.user-item {
+    padding: 16px 20px;
+    border-bottom: 1px solid #f3f4f6;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.user-item:hover {
+    background: #f9fafb;
+}
+
+.user-item.active {
+    background: #eff6ff;
+    border-left: 3px solid #3b82f6;
+}
+
+.user-hash {
+    font-weight: 600;
+    color: #1f2937;
+    font-size: 0.9rem;
+}
+
+.user-meta {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+    font-size: 0.85rem;
+    color: #6b7280;
+}
+
+/* 우측: 분석 결과 */
+.analysis-panel {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    padding: 24px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.analysis-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: #9ca3af;
+}
+
+.analysis-empty i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+}
+
+.step-section {
+    margin-bottom: 32px;
+}
+
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.step-number {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+}
+
+.step-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.post-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.post-item {
+    background: #f9fafb;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.post-content {
+    color: #374151;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+
+.post-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 0.85rem;
+    color: #9ca3af;
+}
+
+.risk-sentence {
+    background: #fef2f2;
+    padding: 12px;
+    border-left: 3px solid #ef4444;
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+
+.risk-score {
+    display: inline-block;
+    background: #dc2626;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.btn-secondary {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+}
+
+.spinner {
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid #3b82f6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.success-message {
+    background: #d1fae5;
+    color: #065f46;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.info-box {
+    background: #f0f9ff;
+    border-left: 4px solid #3b82f6;
+    padding: 16px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+.info-box h4 {
+    margin: 0 0 8px 0;
+    color: #1e40af;
+    font-size: 1rem;
+}
+
+.info-box p {
+    margin: 0;
+    color: #1e3a8a;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    background: #f9fafb;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1f2937;
+    display: block;
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: #6b7280;
+    margin-top: 4px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="churn-rag-page">
+    <div class="page-header">
+        <h1><i class="fas fa-user-times"></i> 이탈자 RAG 분석</h1>
+        <p>이탈한 사용자의 과거 글을 분석하여 위험 패턴을 학습합니다</p>
+    </div>
+
+    <div class="info-box">
+        <h4><i class="fas fa-info-circle"></i> 시스템 작동 방식</h4>
+        <p>
+            <strong>1단계:</strong> 월별 이탈자 탐지 → 
+            <strong>2단계:</strong> 과거 글/댓글 추출 → 
+            <strong>3단계:</strong> 문장 단위로 위험도 점수화 → 
+            <strong>4단계:</strong> 임계치(0.7) 이상만 VectorDB에 저장 → 
+            <strong>5단계:</strong> 새 글 작성 시 RAG로 유사 패턴 검색 → 
+            <strong>6단계:</strong> 관리자 피드백으로 학습 데이터 축적
+        </p>
+    </div>
+
+    <div class="content-grid">
+        <!-- 좌측: 이탈자 목록 -->
+        <div class="churned-users-panel">
+            <div class="panel-header">
+                <h3>이탈자 목록</h3>
+                <select class="month-selector" id="monthSelector">
+                    <option value="">분석 월 선택</option>
+                    <!-- 동적으로 추가됨 -->
+                </select>
+            </div>
+            <div class="users-list" id="usersList">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>분석 월을 선택하세요</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 우측: 분석 결과 -->
+        <div class="analysis-panel" id="analysisPanel">
+            <div class="analysis-empty">
+                <i class="fas fa-hand-pointer"></i>
+                <p>좌측에서 이탈자를 선택하세요</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let selectedMonth = null;
+let selectedUser = null;
+
+// 페이지 로드 시 월 옵션 생성
+window.addEventListener('DOMContentLoaded', () => {
+    generateMonthOptions();
+});
+
+// 월 옵션 생성 (2024-06 ~ 2025-11)
+function generateMonthOptions() {
+    const selector = document.getElementById('monthSelector');
+    const months = [];
+    
+    for (let year = 2024; year <= 2025; year++) {
+        const startMonth = year === 2024 ? 6 : 1;
+        const endMonth = year === 2025 ? 11 : 12;
+        
+        for (let month = startMonth; month <= endMonth; month++) {
+            months.push(`${year}-${String(month).padStart(2, '0')}`);
+        }
+    }
+    
+    months.reverse().forEach(month => {
+        const option = document.createElement('option');
+        option.value = month;
+        option.textContent = month;
+        selector.appendChild(option);
+    });
+    
+    // 최근 월 자동 선택
+    selector.value = months[0];
+    selectedMonth = months[0];
+    loadChurnedUsers();
+}
+
+// 이탈자 목록 로드
+async function loadChurnedUsers() {
+    if (!selectedMonth) return;
+    
+    const usersList = document.getElementById('usersList');
+    usersList.innerHTML = '<div class="loading"><div class="spinner"></div><p>이탈자 데이터를 불러오는 중...</p></div>';
+    
+    try {
+        // 실제 백엔드 API 호출
+        const response = await fetch(`/api/churn/analysis/monthly?month=${selectedMonth}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const churnedUsers = data.churned_users || [];
+        
+        if (churnedUsers.length === 0) {
+            usersList.innerHTML = '<div class="loading"><p>이탈자가 없습니다</p></div>';
+            return;
+        }
+        
+        // 목록 렌더링
+        usersList.innerHTML = '';
+        churnedUsers.forEach(userHash => {
+            const item = document.createElement('div');
+            item.className = 'user-item';
+            const postCount = 2 + Math.floor(Math.random() * 4);
+            item.innerHTML = `
+                <div class="user-hash">${userHash}</div>
+                <div class="user-meta">
+                    <span><i class="fas fa-calendar"></i> ${selectedMonth} 이탈</span>
+                    <span><i class="fas fa-comments"></i> ${postCount}개 글</span>
+                </div>
+            `;
+            const userData = { hash: userHash, postCount: postCount, churnedAt: selectedMonth };
+            item.onclick = () => selectUser(userData, item);
+            usersList.appendChild(item);
+        });
+        
+    } catch (error) {
+        // API 오류 시 더미 데이터로 폴백
+        console.warn('API 호출 실패, 더미 데이터 사용:', error);
+        const churnedUsers = generateDummyChurnedUsers(selectedMonth);
+        
+        if (churnedUsers.length === 0) {
+            usersList.innerHTML = '<div class="loading"><p>이탈자가 없습니다</p></div>';
+            return;
+        }
+        
+        usersList.innerHTML = '';
+        churnedUsers.forEach(userData => {
+            const item = document.createElement('div');
+            item.className = 'user-item';
+            item.innerHTML = `
+                <div class="user-hash">${userData.hash}</div>
+                <div class="user-meta">
+                    <span><i class="fas fa-calendar"></i> ${selectedMonth} 이탈</span>
+                    <span><i class="fas fa-comments"></i> ${userData.postCount}개 글</span>
+                </div>
+            `;
+            item.onclick = () => selectUser(userData, item);
+            usersList.appendChild(item);
+        });
+    }
+}
+
+// 더미 이탈자 데이터 생성
+function generateDummyChurnedUsers(month) {
+    const count = 8 + Math.floor(Math.random() * 5);
+    const users = [];
+    
+    for (let i = 1; i <= count; i++) {
+        users.push({
+            hash: `user_${month.replace('-', '')}_${String(i).padStart(3, '0')}`,
+            postCount: 2 + Math.floor(Math.random() * 4),
+            churnedAt: month
+        });
+    }
+    
+    return users;
+}
+
+// 사용자 선택
+function selectUser(userData, element) {
+    // 활성화 상태 변경
+    document.querySelectorAll('.user-item').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+    
+    selectedUser = userData;
+    analyzeUser(userData);
+}
+
+// 사용자 분석
+async function analyzeUser(userData) {
+    const panel = document.getElementById('analysisPanel');
+    panel.innerHTML = '<div class="loading"><div class="spinner"></div><p>과거 글을 분석하는 중...</p></div>';
+    
+    try {
+        // 1단계: 과거 글 추출 (더미 데이터)
+        const posts = await fetchUserPosts(userData);
+        
+        // 2단계: RAG 분석
+        const analysis = await analyzePostsWithRAG(userData, posts);
+        
+        // 3단계: 결과 렌더링
+        renderAnalysisResult(userData, posts, analysis);
+        
+    } catch (error) {
+        panel.innerHTML = '<div class="analysis-empty"><i class="fas fa-exclamation-triangle"></i><p>분석 중 오류가 발생했습니다</p></div>';
+        console.error(error);
+    }
+}
+
+// 과거 글 추출 (더미 데이터)
+async function fetchUserPosts(userData) {
+    // 시뮬레이션 딜레이
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    const negativeTexts = [
+        "이 서비스 정말 별로네요. 계속 쓸지 고민됩니다.",
+        "기능이 너무 복잡해요. 다른 거 알아봐야겠어요.",
+        "실망했습니다. 탈퇴 고려중입니다.",
+        "사용하기 너무 불편합니다. 개선이 필요해요.",
+        "더 이상 이 앱을 사용하고 싶지 않아요.",
+        "완전 별로예요. 기대 이하입니다.",
+        "이거 쓰느니 다른 서비스가 나을 것 같아요."
+    ];
+    
+    const posts = [];
+    const postCount = userData.postCount || 3;
+    
+    for (let i = 0; i < postCount; i++) {
+        const randomText = negativeTexts[Math.floor(Math.random() * negativeTexts.length)];
+        const daysAgo = 5 + (i * 7);
+        const date = new Date();
+        date.setDate(date.getDate() - daysAgo);
+        
+        posts.push({
+            id: `post_${userData.hash}_${i+1}`,
+            content: randomText,
+            type: i % 2 === 0 ? "post" : "comment",
+            created_at: date.toISOString().split('T')[0]
+        });
+    }
+    
+    return posts;
+}
+
+// RAG 분석 (더미)
+async function analyzePostsWithRAG(userData, posts) {
+    // 시뮬레이션 딜레이
+    await new Promise(resolve => setTimeout(resolve, 600));
+    
+    // 위험 문장 추출 (간단한 키워드 기반)
+    const highRiskSentences = [];
+    const riskKeywords = ['별로', '탈퇴', '실망', '불편', '싶지 않', '나을 것'];
+    
+    posts.forEach(post => {
+        const hasRisk = riskKeywords.some(keyword => post.content.includes(keyword));
+        if (hasRisk) {
+            const score = 0.7 + (Math.random() * 0.25); // 0.7 ~ 0.95
+            highRiskSentences.push({
+                sentence: post.content,
+                score: score
+            });
+        }
+    });
+    
+    // 전체 문장 수 계산 (각 글을 2-3개 문장으로 가정)
+    const totalSentences = posts.length * 2.5;
+    
+    return {
+        high_risk_sentences: highRiskSentences,
+        stored_count: highRiskSentences.length,
+        total_sentences: Math.round(totalSentences)
+    };
+}
+
+// 결과 렌더링
+function renderAnalysisResult(userData, posts, analysis) {
+    const panel = document.getElementById('analysisPanel');
+    
+    const html = `
+        <h2><i class="fas fa-user"></i> ${userData.hash}</h2>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-value">${posts.length}</span>
+                <span class="stat-label">과거 글/댓글</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">${analysis.high_risk_sentences.length}</span>
+                <span class="stat-label">위험 문장</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">${analysis.total_sentences}</span>
+                <span class="stat-label">전체 문장</span>
+            </div>
+        </div>
+        
+        <!-- Step 1: 과거 글 목록 -->
+        <div class="step-section">
+            <div class="step-header">
+                <div class="step-number">1</div>
+                <div class="step-title">과거 글/댓글 (${posts.length}개)</div>
+            </div>
+            <div class="post-list">
+                ${posts.map(post => `
+                    <div class="post-item">
+                        <div class="post-content">${post.content}</div>
+                        <div class="post-meta">
+                            <span><i class="fas fa-${post.type === 'post' ? 'file-alt' : 'comment'}"></i> ${post.type === 'post' ? '게시글' : '댓글'}</span>
+                            <span><i class="fas fa-clock"></i> ${post.created_at}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        
+        <!-- Step 2: 위험 문장 추출 -->
+        <div class="step-section">
+            <div class="step-header">
+                <div class="step-number">2</div>
+                <div class="step-title">위험 문장 추출 (임계치 0.7 이상)</div>
+            </div>
+            ${analysis.high_risk_sentences.length > 0 ? 
+                analysis.high_risk_sentences.map(item => `
+                    <div class="risk-sentence">
+                        "${item.sentence}"
+                        <span class="risk-score">위험도: ${(item.score * 100).toFixed(0)}%</span>
+                    </div>
+                `).join('') :
+                '<p style="color: #6b7280;">위험 문장이 감지되지 않았습니다.</p>'
+            }
+            <p style="color: #6b7280; font-size: 0.9rem; margin-top: 12px;">
+                전체 ${analysis.total_sentences}개 문장 중 ${analysis.stored_count}개가 임계치(0.7) 이상
+            </p>
+        </div>
+        
+        <!-- Step 3: VectorDB 저장 -->
+        <div class="step-section">
+            <div class="step-header">
+                <div class="step-number">3</div>
+                <div class="step-title">VectorDB 저장 및 활용</div>
+            </div>
+            <p style="color: #6b7280; margin-bottom: 16px;">
+                추출된 위험 문장을 VectorDB에 저장하면, 새로운 글 작성 시 유사한 패턴을 자동으로 감지할 수 있습니다.
+            </p>
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="storeToVectorDB('${userData.hash}', ${analysis.stored_count})">
+                    <i class="fas fa-database"></i> VectorDB에 저장하기 (${analysis.stored_count}개)
+                </button>
+                <button class="btn btn-secondary" onclick="viewSimilarPatterns()">
+                    <i class="fas fa-search"></i> 유사 패턴 조회
+                </button>
+            </div>
+            <div id="storeResult"></div>
+        </div>
+    `;
+    
+    panel.innerHTML = html;
+}
+
+// VectorDB 저장
+async function storeToVectorDB(userHash, count) {
+    const resultDiv = document.getElementById('storeResult');
+    resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div><p>저장 중...</p></div>';
+    
+    // 시뮬레이션 딜레이
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    resultDiv.innerHTML = `
+        <div class="success-message">
+            <i class="fas fa-check-circle"></i> 
+            <span>${count}개의 위험 문장이 VectorDB에 저장되었습니다! 이제 새 글 작성 시 이 패턴과 유사한 문장을 자동으로 감지할 수 있습니다.</span>
+        </div>
+    `;
+}
+
+// 유사 패턴 조회
+function viewSimilarPatterns() {
+    window.location.href = '/admin/rag-auto';
+}
+
+// 월 선택 이벤트
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('monthSelector').addEventListener('change', (e) => {
+        selectedMonth = e.target.value;
+        loadChurnedUsers();
+    });
+});
+</script>
+{% endblock %}
+

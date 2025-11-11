@@ -92,6 +92,8 @@ def get_real_metrics(request: AnalysisRequest) -> Dict:
             return {
                 "churn_rate": 0.0,
                 "active_users": 0,
+                "previous_active_users": 0,
+                "churned_users": 0,
                 "reactivated_users": 0,
                 "long_term_inactive": 0
             }
@@ -102,6 +104,8 @@ def get_real_metrics(request: AnalysisRequest) -> Dict:
         final_metrics = {
             "churn_rate": metrics.get("churn_rate", 0.0),
             "active_users": metrics.get("active_users", 0),
+            "previous_active_users": metrics.get("previous_active_users", 0),
+            "churned_users": metrics.get("churned_users", 0),
             "reactivated_users": metrics.get("reactivated_users", 0),
             "long_term_inactive": metrics.get("long_term_inactive", 0)
         }

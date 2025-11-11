@@ -1,0 +1,96 @@
+{
+  "normal_response": {
+    "summary": "사용자가 탈퇴 의도를 명시적으로 표현했습니다. '더 이상 사용하고 싶지 않아요'라는 문장과 유사한 과거 사례 3건이 발견되었으며, 평균 위험 점수 0.87로 매우 높은 수준입니다.",
+    "risk_level": "high",
+    "evidence": [
+      {
+        "id": "chunk_abc12345",
+        "snippet": "탈퇴할까 생각중입니다 진짜로 더 이상 의미가 없는 것 같아요",
+        "similarity": 0.92
+      },
+      {
+        "id": "chunk_def67890",
+        "snippet": "서비스 떠날까 고민 중이에요... 여기 있을 이유가 없어 보여서",
+        "similarity": 0.88
+      },
+      {
+        "id": "chunk_ghi11121",
+        "snippet": "이제 정말 그만둘 때가 된 것 같습니다 다른 대안을 찾아보고 있어요",
+        "similarity": 0.85
+      }
+    ],
+    "actions": [
+      "즉시 1:1 DM으로 불만사항 확인 및 해결 방안 제시",
+      "고객 서비스팀 에스컬레이션 및 우선 처리",
+      "개인 맞춤 혜택 제공으로 이탈 방지",
+      "탈퇴 전 설문조사 실시하여 개선점 파악"
+    ],
+    "model": "gpt-4o-mini",
+    "prompt_v": "v1.0"
+  },
+  "fallback_response": {
+    "summary": "탈퇴 의도가 명시적으로 표현됨. 고위험 문장 2개 발견.",
+    "risk_level": "high",
+    "evidence": [
+      {
+        "id": "chunk_abc12345",
+        "snippet": "탈퇴할까 생각중입니다 진짜로 더 이상 의미가 없는 것 같아요",
+        "similarity": 0.92
+      },
+      {
+        "id": "chunk_def67890",
+        "snippet": "서비스 떠날까 고민 중이에요... 여기 있을 이유가 없어 보여서",
+        "similarity": 0.88
+      }
+    ],
+    "actions": [
+      "즉시 1:1 DM으로 불만사항 확인 및 해결 방안 제시",
+      "고객 서비스팀 에스컬레이션 및 우선 처리",
+      "개인 맞춤 혜택 제공으로 이탈 방지"
+    ],
+    "model": "gpt-4o-mini",
+    "prompt_v": "v1.0",
+    "warnings": [
+      "LLM 호출 실패로 규칙 기반 폴백 사용됨"
+    ]
+  },
+  "low_evidence_warning": {
+    "summary": "서비스에 대한 불만이 감지되었습니다. 고위험 문장 1개 발견.",
+    "risk_level": "medium",
+    "evidence": [
+      {
+        "id": "chunk_abc12345",
+        "snippet": "서비스가 마음에 안 들어요",
+        "similarity": 0.75
+      }
+    ],
+    "actions": [
+      "1:1 DM으로 서비스 이용 현황 확인",
+      "FAQ 또는 가이드 자료 제공",
+      "커뮤니티 매니저 모니터링 강화"
+    ],
+    "model": "gpt-4o-mini",
+    "prompt_v": "v1.0",
+    "warnings": [
+      "evidence가 1건으로 부족합니다 (최소 2건 권장)"
+    ]
+  },
+  "empty_evidence": {
+    "summary": "위험 요소가 감지되지 않음.",
+    "risk_level": "low",
+    "evidence": [],
+    "actions": [
+      "일반적인 고객 만족도 조사 진행",
+      "정기적인 서비스 개선 안내",
+      "커뮤니티 활동 독려"
+    ],
+    "model": "gpt-4o-mini",
+    "prompt_v": "v1.0",
+    "warnings": [
+      "evidence가 0건으로 부족합니다 (최소 2건 권장)"
+    ]
+  }
+}
+
+
+
