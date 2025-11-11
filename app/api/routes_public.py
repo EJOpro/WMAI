@@ -98,6 +98,14 @@ async def reports_admin(request: Request):
         {"request": request, "title": "신고 관리"}
     )
 
+@router.get("/messages", response_class=HTMLResponse)
+async def messages_page(request: Request):
+    """메시지함 페이지"""
+    return templates.TemplateResponse(
+        "pages/messages.html",
+        {"request": request, "title": "메시지함"}
+    )
+
 # RAG 관련 코드 (테스트 완료 전까지 주석 처리)
 # @router.get("/admin/rag-check", response_class=HTMLResponse)
 # async def admin_rag_check(request: Request):

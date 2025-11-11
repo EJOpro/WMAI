@@ -1624,7 +1624,7 @@ table tbody tr:hover {
 .detail-divider {
     height: 1px;
     background: #e1e8ed;
-    margin: 20px 0;
+    margin: 15px 0 20px;
 }
 
 .feedback-section {
@@ -2132,3 +2132,526 @@ table tbody tr:hover {
     }
 }
 
+
+/* ========================================
+   메시지 ?�스???��???   ======================================== */
+
+/* 메시지??컨테?�너 */
+.messages-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.messages-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+}
+
+.messages-header h1 {
+    font-size: 2rem;
+    color: #1F2937;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* 메시지 ??*/
+.message-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #E5E7EB;
+}
+
+.message-tab {
+    padding: 12px 24px;
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #6B7280;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.message-tab:hover {
+    color: #667eea;
+    background: #F3F4F6;
+}
+
+.message-tab.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+}
+
+.message-tab-content {
+    display: none;
+}
+
+.message-tab-content.active {
+    display: block;
+}
+
+/* 메시지 목록 */
+.message-list-container {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.message-list {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.message-list thead {
+    background: #4B5563;
+    color: white;
+}
+
+.message-list th {
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color:#fff;
+}
+
+.message-list tbody tr {
+    border-bottom: 1px solid #E5E7EB;
+    transition: background-color 0.2s ease;
+}
+
+.message-list tbody tr:hover {
+    background-color: #F9FAFB;
+}
+
+.message-list td {
+    padding: 15px;
+    color: #374151;
+}
+
+.message-unread {
+    background-color: #EFF6FF !important;
+    font-weight: 600;
+}
+
+.message-unread:hover {
+    background-color: #DBEAFE !important;
+}
+
+/* 메시지 ?�림 뱃�? */
+.message-badge {
+    display: inline-block;
+    background: #DC2626;
+    color: white;
+    font-size: 0.75rem;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+    min-width: 18px;
+    text-align: center;
+}
+
+.messages-link {
+    position: relative;
+}
+
+/* 메시지 ?�세 모달 */
+.message-meta {
+    background: #F9FAFB;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-left: 4px solid #667eea;
+}
+
+.message-meta-item {
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+}
+
+.message-meta-item:last-child {
+    margin-bottom: 0;
+}
+
+.message-meta-item strong {
+    color: #4B5563;
+    display: inline-block;
+    min-width: 80px;
+}
+
+.message-content {
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 20px;
+    min-height: 200px;
+    line-height: 1.6;
+    color: #1F2937;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ?�용??검??결과 */
+.search-results {
+    position: relative;
+    background: white;
+    border: 1px solid #D1D5DB;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.search-result-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-bottom: 1px solid #F3F4F6;
+}
+
+.search-result-item:last-child {
+    border-bottom: none;
+}
+
+.search-result-item:hover {
+    background-color: #F3F4F6;
+}
+
+.search-result-item.text-muted {
+    cursor: default;
+    font-style: italic;
+}
+
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 반응???�자??*/
+@media (max-width: 768px) {
+    .messages-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+    }
+
+    .message-tabs {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .message-tab {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .message-list th:nth-child(3),
+    .message-list td:nth-child(3) {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .modal-content {
+        max-width: 95% !important;
+        margin: 10px;
+    }
+}
+
+/* 탭 네비게이션 스타일 */
+.tabs-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid #e1e8ed;
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    background: transparent;
+    border: none;
+    padding: 15px 30px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #7f8c8d;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-bottom: 3px solid transparent;
+    position: relative;
+    bottom: -2px;
+}
+
+.tab-btn:hover {
+    color: #667eea;
+    background: rgba(102, 126, 234, 0.05);
+}
+
+.tab-btn.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+.tab-btn i {
+    margin-right: 8px;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 비동기 분석 상태 표시 */
+.badge {
+    display: inline-block;
+    padding: 5px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-left: 8px;
+}
+
+.badge-warning {
+    background: #F59E0B;
+    color: white;
+}
+
+.analysis-notice {
+    background: #FEF9E7;
+    border-left: 4px solid #F59E0B;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    color: #92400E;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+}
+
+.analysis-notice i {
+    color: #F59E0B;
+}
+
+/* 이미지 분석 로그 테이블 스타일 */
+#imageLogsTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+#imageLogsTable th {
+    background: #4B5563;
+    color: white;
+    padding: 12px;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+#imageLogsTable td {
+    padding: 12px;
+    border-bottom: 1px solid #e1e8ed;
+}
+
+#imageLogsTable tbody tr {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+#imageLogsTable tbody tr:hover {
+    background-color: #f9fafb;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.status-nsfw {
+    background: #EF4444;
+    color: white;
+}
+
+.status-normal {
+    background: #10B981;
+    color: white;
+}
+
+.status-blocked {
+    background: #DC2626;
+    color: white;
+}
+
+.status-passed {
+    background: #059669;
+    color: white;
+}
+
+#imageLogsTable .score-high {
+    color: #DC2626;
+    font-weight: 600;
+}
+
+#imageLogsTable .score-medium {
+    color: #F59E0B;
+    font-weight: 600;
+}
+
+#imageLogsTable .score-low {
+    color: #10B981;
+    font-weight: 600;
+}
+
+/* 이미지 분석 상세 정보 모달 */
+#imageLogModal .detail-grid {
+    display: grid;
+}
+
+#imageLogModal .detail-section {
+    background: #f9fafb;
+    padding: 16px;
+    border-radius: 8px;
+    border-left: 4px solid #667eea;
+}
+
+#imageLogModal .detail-section h4 {
+    margin: 0 0 12px 0;
+    padding-bottom: 8px;
+    color: #2c3e50;
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+#imageLogModal h4 {
+    margin-bottom:10px;
+}
+
+#imageLogModal .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    margin-bottom:5px;
+}
+
+#imageLogModal .detail-label {
+    font-weight: 600;
+    color: #6b7280;
+}
+
+#imageLogModal .detail-value {
+    color: #1f2937;
+    font-weight: 500;
+}
+
+#imageLogModal .extracted-text-box {
+    background: white;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    margin-top: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+#imageLogModal .badge {
+    display: inline-block;
+    padding: 5px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-left: 8px;
+}
+
+#imageLogModal .badge-success {
+    background: #10B981;
+    color: white;
+}
+
+#imageLogModal .badge-danger {
+    background: #EF4444;
+    color: white;
+}
+
+#imageLogModal .badge-warning {
+    background: #F59E0B;
+    color: white;
+}
+
+#imageLogModal .alert {
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 12px 0;
+    font-weight: 500;
+}
+
+#imageLogModal .alert-info {
+    background: #DBEAFE;
+    color: #1E40AF;
+    border-left: 4px solid #3B82F6;
+}
+
+#imageLogModal .alert-warning {
+    background: #FEF3C7;
+    color: #92400E;
+    border-left: 4px solid #F59E0B;
+}
+
+#imageLogModal .alert-success {
+    background: #D1FAE5;
+    color: #065F46;
+    border-left: 4px solid #10B981;
+}
+
+#imageLogModal .alert-danger {
+    background: #FEE2E2;
+    color: #991B1B;
+    border-left: 4px solid #EF4444;
+}
+
+/* 텍스트 분석 로그 테이블 */
+#logsTable th {
+    background: #4B5563;
+    color: white;
+}

@@ -722,3 +722,216 @@ async def get_ethics_feedback_stats(request: Request):
             detail=f"통계 조회 실패: {str(e)}"
         )
 
+
+# ============================================
+# 이미지 분석 로그 관리 API
+# ============================================
+
+@router.get("/admin/images/blocked")
+async def get_blocked_images(
+    request: Request,
+    page: int = 1,
+    limit: int = 20
+):
+    """
+    차단된 이미지 목록 조회 (관리자 전용)
+    
+    Args:
+        page: 페이지 번호
+        limit: 페이지당 개수
+    
+    Returns:
+        차단된 이미지 목록
+    """
+    require_admin(request)
+    
+    offset = (page - 1) * limit
+    
+    try:
+        # 차단된 이미지 목록 조회
+        images = execute_query("""
+            SELECT * FROM v_blocked_images
+            LIMIT %s OFFSET %s
+        """, (limit, offset), fetch_all=True)
+        
+        # 총 개수 조회
+        total = execute_query("""
+            SELECT COUNT(*) as count
+            FROM image_analysis_logs
+            WHERE is_blocked = TRUE
+        """, fetch_one=True)
+        
+        return {
+            'success': True,
+            'images': images,
+            'pagination': {
+                'total': total['count'] if total else 0,
+                'page': page,
+                'limit': limit,
+                'total_pages': ((total['count'] if total else 0) + limit - 1) // limit
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"차단된 이미지 조회 실패: {str(e)}"
+        )
+
+
+@router.get("/admin/images/logs")
+async def get_image_analysis_logs(
+    request: Request,
+    page: int = 1,
+    limit: int = 50,
+    blocked_only: bool = False
+):
+    """
+    이미지 분석 로그 조회 (관리자 전용)
+    
+    Args:
+        page: 페이지 번호
+        limit: 페이지당 개수
+        blocked_only: 차단된 것만 조회
+    
+    Returns:
+        이미지 분석 로그 목록
+    """
+    require_admin(request)
+    
+    offset = (page - 1) * limit
+    where_clause = "WHERE is_blocked = TRUE" if blocked_only else ""
+    
+    try:
+        # 로그 조회
+        logs = execute_query(f"""
+            SELECT 
+                l.*,
+                b.title as board_title,
+                b.user_id as uploader_id,
+                u.username as uploader_name
+            FROM image_analysis_logs l
+            LEFT JOIN board b ON l.board_id = b.id
+            LEFT JOIN users u ON b.user_id = u.id
+            {where_clause}
+            ORDER BY l.created_at DESC
+            LIMIT %s OFFSET %s
+        """, (limit, offset), fetch_all=True)
+        
+        # 총 개수
+        total = execute_query(f"""
+            SELECT COUNT(*) as count
+            FROM image_analysis_logs
+            {where_clause}
+        """, fetch_one=True)
+        
+        return {
+            'success': True,
+            'logs': logs,
+            'pagination': {
+                'total': total['count'] if total else 0,
+                'page': page,
+                'limit': limit,
+                'total_pages': ((total['count'] if total else 0) + limit - 1) // limit
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"이미지 로그 조회 실패: {str(e)}"
+        )
+
+
+@router.get("/admin/images/stats")
+async def get_image_analysis_stats(request: Request):
+    """
+    이미지 분석 통계 (관리자 전용)
+    
+    Returns:
+        이미지 분석 통계 정보
+    """
+    require_admin(request)
+    
+    try:
+        # 전체 통계
+        total_stats = execute_query("""
+            SELECT 
+                COUNT(*) as total_analyzed,
+                SUM(CASE WHEN is_blocked = TRUE THEN 1 ELSE 0 END) as total_blocked,
+                SUM(CASE WHEN is_nsfw = TRUE THEN 1 ELSE 0 END) as total_nsfw,
+                AVG(nsfw_confidence) as avg_nsfw_confidence,
+                AVG(immoral_score) as avg_immoral_score,
+                AVG(spam_score) as avg_spam_score,
+                AVG(response_time) as avg_response_time
+            FROM image_analysis_logs
+        """, fetch_one=True)
+        
+        # 일별 통계 (최근 7일)
+        daily_stats = execute_query("""
+            SELECT 
+                DATE(created_at) as date,
+                COUNT(*) as total,
+                SUM(CASE WHEN is_blocked = TRUE THEN 1 ELSE 0 END) as blocked
+            FROM image_analysis_logs
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+        """, fetch_all=True)
+        
+        return {
+            'success': True,
+            'total_stats': total_stats,
+            'daily_stats': daily_stats
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"이미지 통계 조회 실패: {str(e)}"
+        )
+
+
+@router.delete("/admin/images/logs/{log_id}")
+async def delete_image_log(request: Request, log_id: int):
+    """
+    이미지 분석 로그 삭제 (관리자 전용)
+    
+    Args:
+        log_id: 삭제할 로그 ID
+        
+    Returns:
+        삭제 결과
+    """
+    require_admin(request)
+    
+    try:
+        # 로그 존재 확인
+        log = execute_query("""
+            SELECT id, filename
+            FROM image_analysis_logs
+            WHERE id = %s
+        """, (log_id,), fetch_one=True)
+        
+        if not log:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="로그를 찾을 수 없습니다"
+            )
+        
+        # 로그 삭제
+        execute_query("""
+            DELETE FROM image_analysis_logs
+            WHERE id = %s
+        """, (log_id,))
+        
+        return {
+            'success': True,
+            'message': '로그가 삭제되었습니다',
+            'deleted_id': log_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"로그 삭제 실패: {str(e)}"
+        )
