@@ -501,8 +501,8 @@ class CommentUpdate(BaseModel):
 async def get_posts(
     request: Request,
     category: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20
+    page: Optional[int] = None,
+    limit: Optional[int] = None
 ):
     """
     게시글 목록 조회
@@ -512,6 +512,12 @@ async def get_posts(
         page: 페이지 번호 (기본 1)
         limit: 페이지당 게시글 수 (기본 20)
     """
+    # 파라미터 기본값 설정
+    if page is None or page < 1:
+        page = 1
+    if limit is None or limit < 1 or limit > 100:
+        limit = 20
+    
     offset = (page - 1) * limit
     
     # 기본 쿼리 (LEFT JOIN으로 탈퇴한 사용자 처리)
@@ -574,6 +580,152 @@ async def get_posts(
             'total_pages': (total + limit - 1) // limit
         }
     }
+
+
+@router.get("/board/search-results")
+async def get_search_result_posts(
+    request: Request,
+    post_ids: str,
+    page: int = 1,
+    limit: int = 20,
+    sort_by: str = "latest"
+):
+    """
+    검색 결과 기반 게시글 조회
+    
+    Query Params:
+        post_ids: 쉼표로 구분된 게시글 ID 목록
+        page: 페이지 번호 (기본 1)
+        limit: 페이지당 게시글 수 (기본 20)
+        sort_by: 정렬 방식 (latest, popular, similarity)
+    """
+    try:
+        # post_ids 파싱
+        if not post_ids.strip():
+            return {
+                'success': True,
+                'posts': [],
+                'pagination': {
+                    'page': page,
+                    'limit': limit,
+                    'total': 0,
+                    'total_pages': 0
+                }
+            }
+        
+        id_list = [int(id.strip()) for id in post_ids.split(',') if id.strip().isdigit()]
+        
+        if not id_list:
+            return {
+                'success': True,
+                'posts': [],
+                'pagination': {
+                    'page': page,
+                    'limit': limit,
+                    'total': 0,
+                    'total_pages': 0
+                }
+            }
+        
+        # IN 절을 위한 플레이스홀더 생성
+        placeholders = ','.join(['%s'] * len(id_list))
+        
+        # 기본 쿼리
+        query = f"""
+            SELECT 
+                b.id, b.title, b.content, b.category, b.status,
+                b.like_count, b.view_count, b.created_at, b.updated_at,
+                u.id as user_id, COALESCE(u.username, '탈퇴한 사용자') as username
+            FROM board b
+            LEFT JOIN users u ON b.user_id = u.id
+            WHERE b.status = 'exposed' AND b.id IN ({placeholders})
+        """
+        
+        # 정렬 추가
+        if sort_by == "latest":
+            query += " ORDER BY b.created_at DESC"
+        elif sort_by == "popular":
+            query += " ORDER BY (b.like_count + b.view_count) DESC, b.created_at DESC"
+        elif sort_by == "similarity":
+            # 검색 결과 순서 유지 (FIELD 함수 사용)
+            field_order = ','.join(map(str, id_list))
+            query += f" ORDER BY FIELD(b.id, {field_order})"
+        else:
+            query += " ORDER BY b.created_at DESC"
+        
+        posts = execute_query(query, tuple(id_list), fetch_all=True)
+        
+        # 결과 포맷팅 및 메타데이터 추가
+        formatted_posts = []
+        board_count = 0
+        comment_count = 0
+        
+        for post in posts:
+            # 문서 타입 결정 (기본값: board)
+            doc_type = 'board'  # 현재는 게시글만 검색하므로 board로 고정
+            
+            if doc_type == 'board':
+                board_count += 1
+            else:
+                comment_count += 1
+            
+            formatted_posts.append({
+                'id': post['id'],
+                'title': post['title'],
+                'content': post['content'][:200],  # 미리보기용 200자
+                'category': post['category'],
+                'like_count': post['like_count'],
+                'view_count': post['view_count'],
+                'created_at': post['created_at'].isoformat() if post['created_at'] else None,
+                'updated_at': post['updated_at'].isoformat() if post['updated_at'] else None,
+                'author': {
+                    'id': post['user_id'],
+                    'username': post['username']
+                },
+                # 검색 메타데이터 추가
+                'doc_type': doc_type,
+                'similarity_score': 100 - (id_list.index(post['id']) * 10) if post['id'] in id_list else 0,
+                'search_method': 'ensemble',
+                'chunk_index': 0,
+                'chunk_count': 1
+            })
+        
+        total = len(formatted_posts)
+        
+        # 검색 메타데이터
+        search_metadata = {
+            'search_method': 'BM25+Vector 앙상블',
+            'total_results': total,
+            'board_count': board_count,
+            'comment_count': comment_count,
+            'search_time_ms': 0  # 실제 검색 시간은 프론트엔드에서 계산
+        }
+        
+        return {
+            'success': True,
+            'posts': formatted_posts,
+            'search_metadata': search_metadata,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'total_pages': (total + limit - 1) // limit if total > 0 else 0
+            }
+        }
+        
+    except Exception as e:
+        print(f"[ERROR] 검색 결과 조회 실패: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'posts': [],
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': 0,
+                'total_pages': 0
+            }
+        }
 
 
 @router.get("/board/posts/{post_id}")

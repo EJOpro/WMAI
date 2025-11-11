@@ -1217,6 +1217,32 @@
             document.getElementById('detailModal').classList.remove('show');
         }
         
+        // postMessage 리스너 - 챗봇에서 명령 받기
+        window.addEventListener('message', function(event) {
+            // 보안: 같은 origin에서만 허용
+            if (event.origin !== window.location.origin) return;
+            
+            if (!event.data || !event.data.type) return;
+            
+            const { type, data } = event.data;
+            
+            console.log('admin_reports received message:', type, data);
+            
+            if (type === 'reload_reports') {
+                // 현재 페이지로 신고 목록 새로고침
+                loadReports(currentPage);
+            } else if (type === 'filter_reports') {
+                // 필터 변경 후 첫 페이지로 이동
+                if (data.status !== undefined) {
+                    document.getElementById('statusFilter').value = data.status || '';
+                }
+                if (data.type !== undefined) {
+                    document.getElementById('typeFilter').value = data.type || '';
+                }
+                loadReports(1);
+            }
+        });
+        
         // 초기화
         (async function() {
             await loadUserInfo();

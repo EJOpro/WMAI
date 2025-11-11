@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>의미기반 검색 결과 - Community Admin</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/img/sub_home.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <style>
+        body { 
+            background-color: #F9FAFB; 
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+        }
+        
+        .search-board-container {
+            padding: 20px;
+            height: 100vh;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+        
+        .search-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #E5E7EB;
+        }
+        
+        .search-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1F2937;
+            margin: 0;
+        }
+        
+        .search-info {
+            font-size: 0.875rem;
+            color: #6B7280;
+        }
+        
+        .search-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .control-label {
+            font-size: 0.875rem;
+            color: #374151;
+            font-weight: 500;
+        }
+        
+        .control-select {
+            padding: 6px 12px;
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: white;
+            color: #374151;
+        }
+        
+        .category-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .category-tab {
+            padding: 8px 16px;
+            border: 1px solid #D1D5DB;
+            background: white;
+            color: #6B7280;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .category-tab:hover {
+            background: #F3F4F6;
+            border-color: #9CA3AF;
+        }
+        
+        .category-tab.active {
+            background: #2563EB;
+            color: white;
+            border-color: #2563EB;
+        }
+        
+        .post-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .post-item {
+            background: white;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        
+        .post-item:hover {
+            border-color: #2563EB;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+        }
+        
+        .post-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        
+        .post-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1F2937;
+            margin: 0;
+            line-height: 1.4;
+            flex: 1;
+        }
+        
+        .post-category {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #EFF6FF;
+            color: #1E40AF;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .post-content {
+            color: #4B5563;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            margin-bottom: 12px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .post-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.75rem;
+            color: #6B7280;
+            align-items: center;
+        }
+        
+        .post-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6B7280;
+            font-size: 0.875rem;
+        }
+        
+        .no-posts {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6B7280;
+        }
+        
+        .no-posts-icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-top: 30px;
+            padding: 20px;
+        }
+        
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #D1D5DB;
+            background: white;
+            color: #374151;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #F3F4F6;
+            border-color: #9CA3AF;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination button.active {
+            background: #2563EB;
+            color: white;
+            border-color: #2563EB;
+        }
+        
+        .search-status {
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 0.875rem;
+            color: #1E40AF;
+        }
+        
+        .similarity-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: #10B981;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+        
+        .search-method-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            color: #1E40AF;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .chunk-indicator {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #F3F4F6;
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            color: #6B7280;
+            margin-left: 4px;
+        }
+        
+        .comment-parent-info {
+            font-size: 0.75rem;
+            color: #6B7280;
+            margin-bottom: 4px;
+            font-style: italic;
+        }
+        
+        .search-stats {
+            background: #F0F9FF;
+            border: 1px solid #BAE6FD;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 0.875rem;
+            color: #0C4A6E;
+        }
+        
+        .doc-type-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+        
+        .doc-type-badge.board {
+            background: #DBEAFE;
+            color: #1E40AF;
+        }
+        
+        .doc-type-badge.comment {
+            background: #FEF3C7;
+            color: #92400E;
+        }
+        
+        .search-info-enhanced {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.875rem;
+            color: #6B7280;
+        }
+        
+        .search-time {
+            color: #9CA3AF;
+            font-size: 0.75rem;
+        }
+        
+        /* 게시글 상세보기 모달 */
+        .post-detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1000;
+        }
+        
+        .post-detail-modal.show {
+            display: block;
+        }
+        
+        .modal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            cursor: pointer;
+        }
+        
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+        
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -45%);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%);
+            }
+        }
+        
+        .modal-close {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: #F3F4F6;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 24px;
+            line-height: 1;
+            color: #6B7280;
+            transition: all 0.2s;
+            z-index: 10;
+        }
+        
+        .modal-close:hover {
+            background: #E5E7EB;
+            color: #1F2937;
+        }
+        
+        .modal-body {
+            padding: 32px;
+        }
+        
+        .modal-loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6B7280;
+        }
+        
+        .modal-loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #E5E7EB;
+            border-top: 4px solid #2563EB;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .post-detail-header {
+            border-bottom: 2px solid #E5E7EB;
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+        }
+        
+        .post-detail-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #1F2937;
+            margin: 0 0 12px 0;
+            line-height: 1.3;
+        }
+        
+        .post-detail-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 0.875rem;
+            color: #6B7280;
+            flex-wrap: wrap;
+        }
+        
+        .post-detail-meta span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .post-detail-content {
+            font-size: 1rem;
+            line-height: 1.8;
+            color: #1F2937;
+            margin-bottom: 32px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .post-detail-comments {
+            border-top: 2px solid #E5E7EB;
+            padding-top: 24px;
+        }
+        
+        .comments-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1F2937;
+            margin: 0 0 16px 0;
+        }
+        
+        .comment-item {
+            background: #F9FAFB;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        
+        .comment-item.reply {
+            margin-left: 32px;
+            background: #F3F4F6;
+        }
+        
+        .comment-author {
+            font-weight: 600;
+            color: #1F2937;
+            font-size: 0.875rem;
+            margin-bottom: 6px;
+        }
+        
+        .comment-content {
+            color: #4B5563;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        
+        .comment-date {
+            font-size: 0.75rem;
+            color: #9CA3AF;
+        }
+        
+        .no-comments {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9CA3AF;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="search-board-container">
+        <!-- 검색 헤더 -->
+        <div class="search-header">
+            <h1 class="search-title" id="searchTitle">의미기반 검색 결과</h1>
+            <div class="search-info-enhanced" id="searchInfo">
+                <span>총 <span id="totalCount">0</span>개 결과</span>
+                <span id="searchTime" class="search-time"></span>
+            </div>
+        </div>
+        
+        <!-- 검색 통계 -->
+        <div class="search-stats" id="searchStats" style="display: none;">
+            <div id="searchStatsContent"></div>
+        </div>
+        
+        <!-- 컨트롤 -->
+        <div class="search-controls">
+            <div class="control-group">
+                <span class="control-label">정렬:</span>
+                <select class="control-select" id="sortSelect">
+                    <option value="latest">최신순</option>
+                    <option value="popular">인기순</option>
+                    <option value="similarity" selected>유사도순</option>
+                </select>
+            </div>
+        </div>
+        
+        
+        <!-- 게시글 목록 -->
+        <div class="post-list" id="postList">
+            <div class="loading">게시글을 불러오는 중...</div>
+        </div>
+        
+    </div>
+    
+    <!-- 게시글 상세보기 모달 -->
+    <div class="post-detail-modal" id="postDetailModal">
+        <div class="modal-overlay" onclick="closePostDetail()"></div>
+        <div class="modal-content">
+            <button class="modal-close" onclick="closePostDetail()">×</button>
+            <div class="modal-body" id="modalBody">
+                <!-- 로딩 또는 게시글 상세 내용 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 전역 변수
+        let currentSort = 'similarity';
+        let currentPostIds = [];
+        let currentSearchQuery = '';
+        let searchMetadata = {};
+        let allPosts = [];
+        let filteredPosts = [];
+        let searchStartTime = null;
+        
+        // 카테고리 라벨 매핑
+        const categoryLabels = {
+            'free': '자유게시판',
+            'notice': '공지사항',
+            'qna': '질문답변',
+            'review': '후기',
+            'tips': '팁/노하우'
+        };
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            setupEventListeners();
+            
+            // 부모 창에 준비 완료 알림
+            if (window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'board_ready'
+                }, '*');
+            }
+        });
+        
+        // 이벤트 리스너 설정
+        function setupEventListeners() {
+            // 정렬 변경
+            document.getElementById('sortSelect').addEventListener('change', function(e) {
+                currentSort = e.target.value;
+                applyFiltersAndSort();
+            });
+            
+            // postMessage 수신
+            window.addEventListener('message', function(event) {
+                console.log('[DEBUG] board_search.html postMessage 수신:', event.data);
+                console.log('[DEBUG] event.origin:', event.origin);
+                console.log('[DEBUG] window.location.origin:', window.location.origin);
+                
+                if (event.origin !== window.location.origin) {
+                    console.warn('[WARN] origin 불일치, 메시지 무시');
+                    return;
+                }
+                
+                const { type, data } = event.data;
+                console.log('[DEBUG] 메시지 타입:', type, '데이터:', data);
+                
+                switch (type) {
+                    case 'load_search_results':
+                        console.log('[DEBUG] load_search_results 호출');
+                        loadSearchResults(data);
+                        break;
+                    case 'navigate_page':
+                        console.log('[DEBUG] navigate_page 호출');
+                        navigateToPage(data.page);
+                        break;
+                    case 'change_sort':
+                        console.log('[DEBUG] change_sort 호출');
+                        changeSortOrder(data.sort_by);
+                        break;
+                    case 'filter_category':
+                        console.log('[DEBUG] filter_category 호출');
+                        filterByCategory(data.category);
+                        break;
+                    case 'show_post_detail':
+                        console.log('[DEBUG] show_post_detail 호출');
+                        showPostDetail(data);
+                        break;
+                    default:
+                        console.warn('[WARN] 알 수 없는 메시지 타입:', type);
+                }
+            });
+        }
+        
+        // 검색 결과 로드
+        async function loadSearchResults(data) {
+            console.log('[DEBUG] loadSearchResults 시작, data:', data);
+            searchStartTime = Date.now();
+            
+            try {
+                const { post_ids, search_query, search_metadata } = data;
+                currentPostIds = post_ids || [];
+                currentSearchQuery = search_query || '';
+                searchMetadata = search_metadata || {};
+                
+                console.log('[DEBUG] currentPostIds:', currentPostIds);
+                console.log('[DEBUG] currentSearchQuery:', currentSearchQuery);
+                console.log('[DEBUG] searchMetadata:', searchMetadata);
+                
+                // 검색 통계 표시
+                if (currentSearchQuery) {
+                    displaySearchStats();
+                }
+                
+                if (currentPostIds.length === 0) {
+                    console.log('[INFO] post_ids가 비어있습니다. 기본 게시글 목록을 표시합니다.');
+                    await loadAllPosts();
+                    return;
+                }
+                
+                // API 호출하여 게시글 데이터 가져오기
+                const apiUrl = `/api/board/search-results?post_ids=${currentPostIds.join(',')}`;
+                console.log('[DEBUG] API 호출:', apiUrl);
+                
+                const response = await fetch(apiUrl);
+                console.log('[DEBUG] API 응답 상태:', response.status);
+                
+                const result = await response.json();
+                console.log('[DEBUG] API 결과:', result);
+                
+                if (result.success) {
+                    allPosts = result.posts || [];
+                    // 검색 메타데이터를 게시글에 추가
+                    if (result.search_metadata) {
+                        searchMetadata = { ...searchMetadata, ...result.search_metadata };
+                    }
+                    console.log('[DEBUG] 로드된 게시글 수:', allPosts.length);
+                    // 검색 결과는 유사도순으로 정렬
+                    currentSort = 'similarity';
+                    document.getElementById('sortSelect').value = 'similarity';
+                    applyFiltersAndSort();
+                } else {
+                    console.error('[ERROR] API 응답 실패:', result);
+                    displayError('게시글을 불러올 수 없습니다.');
+                }
+                
+            } catch (error) {
+                console.error('[ERROR] 검색 결과 로드 실패:', error);
+                displayError('게시글을 불러오는 중 오류가 발생했습니다.');
+            }
+        }
+        
+        // 전체 게시글 로드 (post_ids가 비어있을 때)
+        async function loadAllPosts() {
+            try {
+                console.log('[DEBUG] 전체 게시글 로드 시작');
+                const apiUrl = '/api/board/posts?page=1&limit=50';
+                const response = await fetch(apiUrl);
+                const result = await response.json();
+                
+                if (result.success && result.posts) {
+                    allPosts = result.posts || [];
+                    currentPostIds = allPosts.map(post => post.id);
+                    console.log('[DEBUG] 전체 게시글 로드 완료:', allPosts.length);
+                    
+                    // 검색 통계 숨기기
+                    document.getElementById('searchStats').style.display = 'none';
+                    document.getElementById('searchTitle').textContent = '전체 게시판';
+                    currentSort = 'latest';
+                    document.getElementById('sortSelect').value = 'latest';
+                    
+                    applyFiltersAndSort();
+                } else {
+                    console.error('[ERROR] 전체 게시글 로드 실패:', result);
+                    displayError('게시글을 불러올 수 없습니다.');
+                }
+            } catch (error) {
+                console.error('[ERROR] 전체 게시글 로드 중 오류:', error);
+                displayError('게시글을 불러오는 중 오류가 발생했습니다.');
+            }
+        }
+        
+        // 유사도 점수 계산
+        function calculateSimilarityScore(post, fallbackIndex = null) {
+            if (typeof post.similarity_score === 'number') {
+                return Math.max(0, Math.min(100, Math.round(post.similarity_score)));
+            }
+            if (currentPostIds.length > 0) {
+                const idx = currentPostIds.indexOf(post.id);
+                if (idx >= 0) {
+                    const maxScore = 100;
+                    const step = currentPostIds.length > 1 ? maxScore / Math.max(currentPostIds.length - 1, 1) : maxScore;
+                    return Math.max(0, Math.min(100, Math.round(maxScore - idx * step)));
+                }
+            }
+            if (fallbackIndex !== null) {
+                return Math.max(0, Math.min(100, Math.round(100 - fallbackIndex * 5)));
+            }
+            return 0;
+        }
+        
+        // 필터링 및 정렬 적용
+        function applyFiltersAndSort() {
+            // 카테고리 필터링 제거 - 모든 게시글 표시
+            filteredPosts = [...allPosts];
+            
+            // 정렬
+            filteredPosts.sort((a, b) => {
+                switch (currentSort) {
+                    case 'latest':
+                        return new Date(b.created_at) - new Date(a.created_at);
+                    case 'popular':
+                        return (b.like_count + b.view_count) - (a.like_count + a.view_count);
+                    case 'similarity':
+                        const aScore = calculateSimilarityScore(a);
+                        const bScore = calculateSimilarityScore(b);
+                        return bScore - aScore;
+                    default:
+                        return 0;
+                }
+            });
+            
+            displayPosts();
+        }
+        
+        // 게시글 표시
+        function displayPosts() {
+            const postList = document.getElementById('postList');
+            const totalCount = document.getElementById('totalCount');
+            
+            totalCount.textContent = filteredPosts.length;
+            
+            // 검색 시간 표시
+            if (searchStartTime) {
+                const searchTime = Date.now() - searchStartTime;
+                document.getElementById('searchTime').textContent = `(${(searchTime / 1000).toFixed(2)}초)`;
+            }
+            
+            if (filteredPosts.length === 0) {
+                displayNoPosts();
+                return;
+            }
+            
+            // 모든 게시글 표시 (페이지네이션 제거)
+            const html = filteredPosts.map((post, index) => {
+                const date = new Date(post.created_at);
+                const dateStr = date.toLocaleDateString('ko-KR');
+                
+                // 유사도 계산 (검색 결과 순서 기반)
+                const similarity = calculateSimilarityScore(post, index);
+                
+                // 문서 타입 결정
+                const docType = post.doc_type || 'board';
+                const docTypeBadge = docType === 'board' ? 
+                    '<span class="doc-type-badge board">📄 게시글</span>' :
+                    '<span class="doc-type-badge comment">💬 댓글</span>';
+                
+                // 검색 방식 배지
+                const searchMethodBadge = currentSearchQuery ? 
+                    '<span class="search-method-badge">BM25+Vector</span>' : '';
+                
+                // 청크 정보
+                const chunkInfo = post.chunk_count > 1 ? 
+                    `<span class="chunk-indicator">청크 ${post.chunk_index + 1}/${post.chunk_count}</span>` : '';
+                
+                // 댓글인 경우 원본 게시글 정보
+                const parentInfo = docType === 'comment' && post.board_title ? 
+                    `<div class="comment-parent-info">원본 게시글: ${escapeHtml(post.board_title)}</div>` : '';
+                
+                return `
+                    <div class="post-item" onclick="openPostDetail(${post.id})" data-post-id="${post.id}">
+                        <div class="post-header">
+                            <h3 class="post-title">
+                                ${docTypeBadge}
+                                ${escapeHtml(post.title)}
+                                <span class="post-category">${categoryLabels[post.category] || post.category}</span>
+                                ${searchMethodBadge}
+                                ${chunkInfo}
+                            </h3>
+                        </div>
+                        ${parentInfo}
+                        <div class="post-content">${escapeHtml(post.content)}</div>
+                        <div class="post-meta">
+                            <span>👤 ${escapeHtml(post.author?.username || '익명')}</span>
+                            <span>📅 ${dateStr}</span>
+                            <span>👁️ ${post.view_count || 0}</span>
+                            <span>❤️ ${post.like_count || 0}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            postList.innerHTML = html;
+        }
+        
+        // 검색 통계 표시
+        function displaySearchStats() {
+            const searchStats = document.getElementById('searchStats');
+            const searchStatsContent = document.getElementById('searchStatsContent');
+            
+            if (!currentSearchQuery) {
+                searchStats.style.display = 'none';
+                return;
+            }
+            
+            const boardCount = searchMetadata.board_count || 0;
+            const commentCount = searchMetadata.comment_count || 0;
+            const totalResults = searchMetadata.total_results || currentPostIds.length;
+            const searchMethod = searchMetadata.search_method || 'BM25+Vector 앙상블';
+            
+            searchStatsContent.innerHTML = `
+                <strong>"${escapeHtml(currentSearchQuery)}"</strong> 검색 결과 
+                (${searchMethod}) - 
+                총 ${totalResults}건 
+                (게시글 ${boardCount}개, 댓글 ${commentCount}개)
+            `;
+            
+            searchStats.style.display = 'block';
+        }
+        
+        // 페이지 이동 (제거됨 - 모든 결과를 한 페이지에 표시)
+        function navigateToPage(page) {
+            // 페이지네이션 제거로 인해 사용하지 않음
+            console.log('페이지네이션이 제거되었습니다.');
+        }
+        
+        // 정렬 순서 변경
+        function changeSortOrder(sortBy) {
+            document.getElementById('sortSelect').value = sortBy;
+            currentSort = sortBy;
+            applyFiltersAndSort();
+        }
+        
+        // 카테고리 필터링 (제거됨)
+        function filterByCategory(category) {
+            console.log('카테고리 필터링이 제거되었습니다.');
+        }
+        
+        // 게시글 상세보기 (모달로 표시)
+        async function openPostDetail(postId) {
+            if (!postId || postId <= 0) return;
+            
+            const modal = document.getElementById('postDetailModal');
+            const modalBody = document.getElementById('modalBody');
+            
+            // 모달 표시
+            modal.classList.add('show');
+            
+            // 로딩 표시
+            modalBody.innerHTML = `
+                <div class="modal-loading">
+                    <div class="modal-loading-spinner"></div>
+                    <div>게시글을 불러오는 중...</div>
+                </div>
+            `;
+            
+            try {
+                // API 호출
+                const response = await fetch(`/api/board/posts/${postId}`);
+                const data = await response.json();
+                
+                if (data.success && data.post) {
+                    renderPostDetail(data.post, data.comments);
+                } else {
+                    modalBody.innerHTML = `
+                        <div class="modal-loading">
+                            <div style="font-size: 3rem; margin-bottom: 16px; opacity: 0.5;">⚠️</div>
+                            <div>게시글을 불러올 수 없습니다.</div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('게시글 조회 실패:', error);
+                modalBody.innerHTML = `
+                    <div class="modal-loading">
+                        <div style="font-size: 3rem; margin-bottom: 16px; opacity: 0.5;">⚠️</div>
+                        <div>오류가 발생했습니다.</div>
+                    </div>
+                `;
+            }
+        }
+        
+        // 게시글 상세 정보 렌더링
+        function renderPostDetail(post, comments) {
+            const modalBody = document.getElementById('modalBody');
+            const categoryLabels = {
+                'free': '자유게시판',
+                'notice': '공지사항',
+                'qna': '질문답변',
+                'review': '후기',
+                'tips': '팁/노하우'
+            };
+            
+            const date = new Date(post.created_at);
+            const dateStr = date.toLocaleDateString('ko-KR');
+            const timeStr = date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+            
+            let html = `
+                <div class="post-detail-header">
+                    <h1 class="post-detail-title">${escapeHtml(post.title)}</h1>
+                    <div class="post-detail-meta">
+                        <span>🏷️ ${categoryLabels[post.category] || post.category}</span>
+                        <span>👤 ${escapeHtml(post.author.username)}</span>
+                        <span>📅 ${dateStr} ${timeStr}</span>
+                        <span>👁️ ${post.view_count}</span>
+                        <span>❤️ ${post.like_count}</span>
+                    </div>
+                </div>
+                
+                <div class="post-detail-content">
+                    ${escapeHtml(post.content)}
+                </div>
+            `;
+            
+            // 댓글 섹션
+            if (comments && comments.length > 0) {
+                html += `
+                    <div class="post-detail-comments">
+                        <h2 class="comments-title">💬 댓글 (${comments.length}개)</h2>
+                `;
+                
+                comments.forEach(comment => {
+                    html += renderComment(comment);
+                });
+                
+                html += `</div>`;
+            } else {
+                html += `
+                    <div class="post-detail-comments">
+                        <h2 class="comments-title">💬 댓글 (0개)</h2>
+                        <div class="no-comments">아직 댓글이 없습니다.</div>
+                    </div>
+                `;
+            }
+            
+            modalBody.innerHTML = html;
+        }
+        
+        // 댓글 렌더링 (재귀적으로 대댓글 처리)
+        function renderComment(comment) {
+            const date = new Date(comment.created_at);
+            const dateStr = date.toLocaleDateString('ko-KR');
+            const timeStr = date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+            
+            let html = `
+                <div class="comment-item">
+                    <div class="comment-author">${escapeHtml(comment.author.username)}</div>
+                    <div class="comment-content">${escapeHtml(comment.content)}</div>
+                    <div class="comment-date">${dateStr} ${timeStr}</div>
+                </div>
+            `;
+            
+            // 대댓글이 있으면 재귀적으로 렌더링
+            if (comment.replies && comment.replies.length > 0) {
+                comment.replies.forEach(reply => {
+                    const replyDate = new Date(reply.created_at);
+                    const replyDateStr = replyDate.toLocaleDateString('ko-KR');
+                    const replyTimeStr = replyDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                    
+                    html += `
+                        <div class="comment-item reply">
+                            <div class="comment-author">↳ ${escapeHtml(reply.author.username)}</div>
+                            <div class="comment-content">${escapeHtml(reply.content)}</div>
+                            <div class="comment-date">${replyDateStr} ${replyTimeStr}</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            return html;
+        }
+        
+        // 모달 닫기
+        function closePostDetail() {
+            const modal = document.getElementById('postDetailModal');
+            modal.classList.remove('show');
+        }
+        
+        // 게시글 상세 정보 표시 (부모 창에서 호출 - Agent 명령)
+        function showPostDetail(data) {
+            const { post_id, relative_position } = data;
+            
+            let targetPostId = null;
+            
+            if (post_id) {
+                targetPostId = post_id;
+            } else if (relative_position) {
+                const positions = {
+                    'first': 0, 'second': 1, 'third': 2, 'fourth': 3, 'fifth': 4,
+                    '첫': 0, '첫번째': 0, '두': 1, '두번째': 1, '세': 2, '세번째': 2,
+                    '네': 3, '네번째': 3, '다섯': 4, '다섯번째': 4
+                };
+                const index = positions[relative_position.toLowerCase()];
+                if (index !== undefined && index < filteredPosts.length) {
+                    targetPostId = filteredPosts[index].id;
+                }
+            }
+            
+            if (targetPostId) {
+                openPostDetail(targetPostId);
+            }
+        }
+        
+        // 빈 상태 표시
+        function displayNoPosts() {
+            const postList = document.getElementById('postList');
+            const totalCount = document.getElementById('totalCount');
+            
+            totalCount.textContent = '0';
+            
+            postList.innerHTML = `
+                <div class="no-posts">
+                    <div class="no-posts-icon">🔍</div>
+                    <div>검색 결과가 없습니다.</div>
+                    <div style="margin-top: 8px; font-size: 0.875rem; color: #9CA3AF;">
+                        다른 검색어로 시도해보세요.
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 오류 표시
+        function displayError(message) {
+            const postList = document.getElementById('postList');
+            const totalCount = document.getElementById('totalCount');
+            
+            totalCount.textContent = '0';
+            
+            postList.innerHTML = `
+                <div class="no-posts">
+                    <div class="no-posts-icon">⚠️</div>
+                    <div>${escapeHtml(message)}</div>
+                </div>
+            `;
+        }
+        
+        // HTML 이스케이프
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 전역 함수로 노출 (onclick에서 사용)
+        window.navigateToPage = navigateToPage;
+        window.openPostDetail = openPostDetail;
+    </script>
+</body>
+</html>
+

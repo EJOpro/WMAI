@@ -9,11 +9,11 @@ class Settings(BaseSettings):
     # MySQL 설정
     MYSQL_HOST: str = "localhost"
     MYSQL_PORT: int = 3306
-    MYSQL_DB: str = "trendstream"
-    MYSQL_USER: str = "trendstream_writer"
-    MYSQL_PASSWORD: str
-    READONLY_USER: str = "trendstream_reader"
-    READONLY_PASSWORD: str
+    MYSQL_DB: str = "wmai_db"
+    MYSQL_USER: str = "wmai"
+    MYSQL_PASSWORD: str = "1234"
+    READONLY_USER: str = "wmai"
+    READONLY_PASSWORD: str = "1234"
     
     # Redis 설정
     REDIS_HOST: str = "localhost"
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     
     # API 인증
-    READ_TRENDS_KEY: str
+    READ_TRENDS_KEY: str = "dev_key_123"
     
     # 타임존
     TZ: str = "UTC"

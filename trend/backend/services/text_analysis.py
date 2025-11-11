@@ -119,17 +119,19 @@ class TextAnalysisService:
     
     def _extract_korean_nouns(self, text: str) -> List[str]:
         """한글 명사 추출"""
-        if not KONLPY_AVAILABLE or self.okt is None:
-            # konlpy가 없으면 단순 공백 분리
-            return text.split()
+        # konlpy 대신 간단한 한글 단어 분리 사용
+        import re
         
-        try:
-            # 명사와 형용사 추출
-            nouns = self.okt.nouns(text)
-            return nouns
-        except Exception as e:
-            logger.warning(f"Korean text analysis failed: {e}")
-            return text.split()
+        # 한글 단어만 추출 (2글자 이상)
+        korean_words = re.findall(r'[가-힣]{2,}', text)
+        
+        # 중복 제거 및 불용어 필터링
+        filtered_words = []
+        for word in korean_words:
+            if len(word) >= 2 and word not in self.stopwords:
+                filtered_words.append(word)
+        
+        return filtered_words
     
     def _extract_english_words(self, text: str) -> List[str]:
         """영어 단어 추출"""
