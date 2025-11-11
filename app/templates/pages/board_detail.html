@@ -350,6 +350,102 @@
         .btn-outline:hover {
             background: #FEF2F2;
         }
+        /* 이미지 갤러리 스타일 */
+        .post-images {
+            margin: 20px 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        .post-image {
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #E5E7EB;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .post-image:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .post-image img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            display: block;
+        }
+        /* 이미지 모달 */
+        .image-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        .image-modal img {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+        }
+        .image-modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 40px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .image-modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 48px;
+            cursor: pointer;
+            background: rgba(0, 0, 0, 0.5);
+            border: none;
+            padding: 20px;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+        .image-modal-nav:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+        .image-modal-nav:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .image-modal-nav.prev {
+            left: 20px;
+        }
+        .image-modal-nav.next {
+            right: 20px;
+        }
+        .image-counter {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
         /* 로딩 스피너 애니메이션 */
         .spinner {
             display: inline-block;
@@ -458,6 +554,20 @@
             }
             actions += `<button onclick="likePost()" class="btn btn-secondary">❤️ 좋아요 (${post.like_count})</button>`;
 
+            // 이미지 갤러리 생성
+            let imagesHtml = '';
+            if (post.images && post.images.length > 0) {
+                imagesHtml = '<div class="post-images">';
+                post.images.forEach((image, index) => {
+                    imagesHtml += `
+                        <div class="post-image" onclick="openImageModal(${index})">
+                            <img src="/static/uploads/board/${image.filename}" alt="${image.original_name}">
+                        </div>
+                    `;
+                });
+                imagesHtml += '</div>';
+            }
+
             const html = `
                 <div class="post-card">
                     <div class="post-header">
@@ -470,6 +580,7 @@
                         </div>
                     </div>
                     <div class="post-content">${post.content}</div>
+                    ${imagesHtml}
                     <div class="post-actions">
                         ${actions}
                     </div>
@@ -961,6 +1072,63 @@
             }
         }
 
+        // 이미지 모달 관련 변수
+        let currentImageIndex = 0;
+        let postImages = [];
+
+        // 이미지 모달 관련 함수
+        function openImageModal(index) {
+            if (!postData || !postData.images || postData.images.length === 0) return;
+            
+            currentImageIndex = index;
+            postImages = postData.images;
+            
+            const modal = document.getElementById('imageModal');
+            updateModalImage();
+            modal.style.display = 'flex';
+        }
+
+        function updateModalImage() {
+            const modalImg = document.getElementById('modalImage');
+            const counter = document.getElementById('imageCounter');
+            const prevBtn = document.getElementById('prevImageBtn');
+            const nextBtn = document.getElementById('nextImageBtn');
+            
+            modalImg.src = `/static/uploads/board/${postImages[currentImageIndex].filename}`;
+            counter.textContent = `${currentImageIndex + 1} / ${postImages.length}`;
+            
+            // 버튼 활성화/비활성화
+            prevBtn.disabled = currentImageIndex === 0;
+            nextBtn.disabled = currentImageIndex === postImages.length - 1;
+        }
+
+        function navigateImage(direction) {
+            if (direction === 'prev' && currentImageIndex > 0) {
+                currentImageIndex--;
+            } else if (direction === 'next' && currentImageIndex < postImages.length - 1) {
+                currentImageIndex++;
+            }
+            updateModalImage();
+        }
+
+        function closeImageModal() {
+            document.getElementById('imageModal').style.display = 'none';
+        }
+
+        // ESC 키로 모달 닫기, 화살표 키로 이미지 네비게이션
+        document.addEventListener('keydown', function(e) {
+            const modal = document.getElementById('imageModal');
+            if (modal.style.display === 'flex') {
+                if (e.key === 'Escape') {
+                    closeImageModal();
+                } else if (e.key === 'ArrowLeft') {
+                    navigateImage('prev');
+                } else if (e.key === 'ArrowRight') {
+                    navigateImage('next');
+                }
+            }
+        });
+
         // 초기화
         (async () => {
             await loadUserInfoHeader();
@@ -1009,6 +1177,19 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- 이미지 확대 모달 -->
+    <div id="imageModal" class="image-modal" onclick="event.target === this && closeImageModal()">
+        <button class="image-modal-close" onclick="closeImageModal()">×</button>
+        <button class="image-modal-nav prev" id="prevImageBtn" onclick="event.stopPropagation(); navigateImage('prev')">
+            ‹
+        </button>
+        <img id="modalImage" src="" alt="이미지 확대" onclick="event.stopPropagation()">
+        <button class="image-modal-nav next" id="nextImageBtn" onclick="event.stopPropagation(); navigateImage('next')">
+            ›
+        </button>
+        <div class="image-counter" id="imageCounter">1 / 1</div>
     </div>
 </body>
 </html>

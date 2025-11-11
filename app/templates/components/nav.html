@@ -13,6 +13,12 @@
             <li><a href="/reports" class="nav-link">신고 분류</a></li>
             <li><a href="/ethics_analyze" class="nav-link">비윤리 분석</a></li>
             <li><a href="/ethics_dashboard" class="nav-link">Ethics 로그</a></li>
+            <li>
+                <a href="/messages" class="nav-link messages-link">
+                    <i class="fas fa-envelope"></i> 메시지
+                    <span id="messagesBadge" class="message-badge" style="display: none;">0</span>
+                </a>
+            </li>
         </ul>
         <button class="nav-toggle" aria-label="메뉴 토글">
             <span></span>
@@ -21,4 +27,36 @@
         </button>
     </div>
 </nav>
+
+<!-- 메시지 알림 폴링 스크립트 -->
+<script>
+(function() {
+    async function updateMessageBadge() {
+        try {
+            const response = await fetch('/api/messages/unread-count');
+            if (response.ok) {
+                const data = await response.json();
+                const badge = document.getElementById('messagesBadge');
+                if (badge) {
+                    if (data.count > 0) {
+                        badge.textContent = data.count > 99 ? '99+' : data.count;
+                        badge.style.display = 'inline-block';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('메시지 알림 업데이트 오류:', error);
+        }
+    }
+
+    // 초기 로드
+    if (document.getElementById('messagesBadge')) {
+        updateMessageBadge();
+        // 10초마다 업데이트
+        setInterval(updateMessageBadge, 10000);
+    }
+})();
+</script>
 

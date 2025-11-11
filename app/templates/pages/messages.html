@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}메시지함 - Community{% endblock %}
+
+{% block extra_css %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="messages-container">
+    <!-- 헤더 -->
+    <header class="messages-header">
+        <h1><i class="fas fa-envelope"></i> 메시지함</h1>
+        <button id="newMessageBtn" class="btn btn-primary">
+            <i class="fas fa-pen"></i> 새 메시지
+        </button>
+    </header>
+
+    <!-- 탭 네비게이션 -->
+    <div class="message-tabs">
+        <button class="message-tab active" data-tab="inbox">
+            <i class="fas fa-inbox"></i> 받은 메시지 (<span id="inboxCount">0</span>)
+        </button>
+        <button class="message-tab" data-tab="sent">
+            <i class="fas fa-paper-plane"></i> 보낸 메시지 (<span id="sentCount">0</span>)
+        </button>
+    </div>
+
+    <!-- 받은 메시지함 -->
+    <div id="inboxTab" class="message-tab-content active">
+        <div class="message-list-container">
+            <table class="message-list">
+                <thead>
+                    <tr>
+                        <th style="width: 50px;"></th>
+                        <th style="width: 150px;">발신자</th>
+                        <th>제목</th>
+                        <th style="width: 150px;">받은 시간</th>
+                    </tr>
+                </thead>
+                <tbody id="inboxTableBody">
+                    <tr>
+                        <td colspan="4" class="text-center">메시지를 불러오는 중...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- 페이지네이션 -->
+        <div class="pagination" id="inboxPagination">
+            <button id="inboxPrevPage" class="btn btn-sm" disabled>
+                <i class="fas fa-chevron-left"></i> 이전
+            </button>
+            <span id="inboxPageInfo">1 / 1</span>
+            <button id="inboxNextPage" class="btn btn-sm" disabled>
+                다음 <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 보낸 메시지함 -->
+    <div id="sentTab" class="message-tab-content">
+        <div class="message-list-container">
+            <table class="message-list">
+                <thead>
+                    <tr>
+                        <th style="width: 50px;"></th>
+                        <th style="width: 150px;">수신자</th>
+                        <th>제목</th>
+                        <th style="width: 150px;">보낸 시간</th>
+                    </tr>
+                </thead>
+                <tbody id="sentTableBody">
+                    <tr>
+                        <td colspan="4" class="text-center">메시지를 불러오는 중...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- 페이지네이션 -->
+        <div class="pagination" id="sentPagination">
+            <button id="sentPrevPage" class="btn btn-sm" disabled>
+                <i class="fas fa-chevron-left"></i> 이전
+            </button>
+            <span id="sentPageInfo">1 / 1</span>
+            <button id="sentNextPage" class="btn btn-sm" disabled>
+                다음 <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 메시지 상세 모달 -->
+<div id="messageDetailModal" class="modal">
+    <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-header">
+            <h3 id="messageDetailSubject">메시지</h3>
+            <button id="closeDetailModal" class="btn-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="message-meta">
+                <div class="message-meta-item">
+                    <strong>발신자:</strong> <span id="detailSender">-</span>
+                </div>
+                <div class="message-meta-item">
+                    <strong>수신자:</strong> <span id="detailReceiver">-</span>
+                </div>
+                <div class="message-meta-item">
+                    <strong>보낸 시간:</strong> <span id="detailTime">-</span>
+                </div>
+                <div class="message-meta-item" id="detailReadTimeContainer" style="display: none;">
+                    <strong>읽은 시간:</strong> <span id="detailReadTime">-</span>
+                </div>
+            </div>
+            <div class="message-content" id="messageDetailContent">
+                내용을 불러오는 중...
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="replyBtn" class="btn btn-primary" style="display: none;">
+                <i class="fas fa-reply"></i> 답장
+            </button>
+            <button id="deleteBtn" class="btn btn-danger">
+                <i class="fas fa-trash"></i> 삭제
+            </button>
+            <button id="closeDetailBtn" class="btn btn-secondary">닫기</button>
+        </div>
+    </div>
+</div>
+
+<!-- 새 메시지 작성 모달 -->
+<div id="newMessageModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h3><i class="fas fa-pen"></i> 새 메시지</h3>
+            <button id="closeNewMessageModal" class="btn-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="newMessageForm">
+                <div class="form-group">
+                    <label for="receiverInput">받는 사람 *</label>
+                    <input type="text" id="receiverInput" class="form-control" 
+                           placeholder="사용자명 입력" autocomplete="off" required>
+                    <div id="userSearchResults" class="search-results"></div>
+                </div>
+                <div class="form-group">
+                    <label for="subjectInput">제목</label>
+                    <input type="text" id="subjectInput" class="form-control" 
+                           placeholder="제목 (선택사항)" maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label for="contentInput">내용 *</label>
+                    <textarea id="contentInput" class="form-control" rows="8" 
+                              placeholder="메시지 내용을 입력하세요" maxlength="5000" required></textarea>
+                    <small class="text-muted">
+                        <span id="contentLength">0</span> / 5000
+                    </small>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button id="sendMessageBtn" class="btn btn-primary">
+                <i class="fas fa-paper-plane"></i> 전송
+            </button>
+            <button id="cancelNewMessageBtn" class="btn btn-secondary">취소</button>
+        </div>
+    </div>
+</div>
+
+<!-- 로딩 오버레이 -->
+<div id="loadingOverlay" class="loading-overlay" style="display: none;">
+    <div class="spinner"></div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='/js/messages.js') }}"></script>
+{% endblock %}
+

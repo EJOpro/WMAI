@@ -2,7 +2,7 @@
 게시판 API 라우터
 게시글 및 댓글 CRUD 기능 제공
 """
-from fastapi import APIRouter, Request, HTTPException, status
+from fastapi import APIRouter, Request, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List, Tuple
 from datetime import datetime
@@ -14,11 +14,135 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
 import time
+import uuid
+import json
+import shutil
+from pathlib import Path
 
 router = APIRouter(tags=["board"])
 
 # 백그라운드 작업용 executor
 background_executor = ThreadPoolExecutor(max_workers=4)
+
+# 이미지 업로드 설정
+UPLOAD_DIR = Path("app/static/uploads/board")
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_IMAGES = 5  # 게시글당 최대 이미지 개수
+
+# 업로드 디렉토리 확인 및 생성
+if not UPLOAD_DIR.exists():
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] 업로드 디렉토리 생성: {UPLOAD_DIR}")
+
+
+def validate_image(file: UploadFile) -> Tuple[bool, str]:
+    """
+    이미지 파일 검증
+    
+    Args:
+        file: 업로드된 파일
+    
+    Returns:
+        (검증 성공 여부, 에러 메시지)
+    """
+    # 파일 확장자 검증
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        return False, f"허용되지 않는 파일 형식입니다. 허용 형식: {', '.join(ALLOWED_EXTENSIONS)}"
+    
+    # MIME 타입 검증
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        return False, f"허용되지 않는 파일 타입입니다. (MIME: {file.content_type})"
+    
+    return True, ""
+
+
+async def save_image(file: UploadFile) -> dict:
+    """
+    이미지 파일 저장
+    
+    Args:
+        file: 업로드된 파일
+    
+    Returns:
+        이미지 메타데이터 딕셔너리
+    
+    Raises:
+        HTTPException: 파일 크기 초과 또는 저장 실패
+    """
+    # 파일 크기 검증
+    file_content = await file.read()
+    file_size = len(file_content)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"파일 크기가 너무 큽니다. 최대 {MAX_FILE_SIZE / 1024 / 1024}MB까지 업로드 가능합니다."
+        )
+    
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="빈 파일은 업로드할 수 없습니다."
+        )
+    
+    # 고유한 파일명 생성 (UUID)
+    file_ext = Path(file.filename).suffix.lower()
+    unique_filename = f"{uuid.uuid4()}{file_ext}"
+    file_path = UPLOAD_DIR / unique_filename
+    
+    # 파일 저장
+    try:
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+        
+        print(f"[INFO] 이미지 저장 완료: {unique_filename} ({file_size} bytes)")
+        
+        return {
+            "filename": unique_filename,
+            "original_name": file.filename,
+            "size": file_size
+        }
+    except Exception as e:
+        print(f"[ERROR] 이미지 저장 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="이미지 저장 중 오류가 발생했습니다."
+        )
+
+
+def delete_images(images_json: str):
+    """
+    게시글의 이미지 파일들 삭제
+    
+    Args:
+        images_json: 이미지 정보가 담긴 JSON 문자열
+    """
+    if not images_json:
+        return
+    
+    try:
+        images = json.loads(images_json)
+        if not isinstance(images, list):
+            return
+        
+        for image in images:
+            filename = image.get("filename")
+            if filename:
+                file_path = UPLOAD_DIR / filename
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                        print(f"[INFO] 이미지 삭제 완료: {filename}")
+                    except Exception as e:
+                        print(f"[WARN] 이미지 삭제 실패: {filename}, {e}")
+    except json.JSONDecodeError:
+        print(f"[WARN] 이미지 JSON 파싱 실패: {images_json}")
+    except Exception as e:
+        print(f"[ERROR] 이미지 삭제 중 오류: {e}")
+
 
 # Ethics 분석 관련 import
 try:
@@ -28,6 +152,16 @@ try:
 except ImportError as e:
     print(f"[WARN] Ethics 모듈 import 실패: {e}")
     ETHICS_AVAILABLE = False
+
+# 이미지 분석 관련 import
+try:
+    from ethics.nsfw_detector import get_nsfw_detector
+    from ethics.vision_analyzer import get_vision_analyzer
+    from ethics.image_db_logger import image_logger
+    IMAGE_ANALYSIS_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] Image 분석 모듈 import 실패: {e}")
+    IMAGE_ANALYSIS_AVAILABLE = False
 
 # 전역 analyzer 인스턴스
 ethics_analyzer = None
@@ -290,6 +424,137 @@ def analyze_and_update_post(post_id: int, text: str, ip_address: str = None):
         
     except Exception as e:
         print(f"[ERROR] 게시글 {post_id} - 백그라운드 분석 실패: {e}")
+
+
+async def analyze_images_hybrid(
+    saved_images: List[dict],
+    board_id: Optional[int] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None
+) -> Tuple[bool, str, List[int]]:
+    """
+    이미지 하이브리드 분석 (NSFW 1차 + Vision API 2차)
+    
+    Args:
+        saved_images: 저장된 이미지 정보 리스트
+        board_id: 게시글 ID
+        ip_address: IP 주소
+        user_agent: User Agent
+        
+    Returns:
+        (차단 여부, 차단 사유, 로그 ID 리스트)
+    """
+    if not IMAGE_ANALYSIS_AVAILABLE:
+        print("[WARN] 이미지 분석 모듈 사용 불가 - 분석 건너뜀")
+        return False, "", []
+    
+    log_ids = []
+    
+    for image in saved_images:
+        start_time = time.time()
+        image_path = UPLOAD_DIR / image['filename']
+        
+        nsfw_result = None
+        vision_result = None
+        is_blocked = False
+        block_reason = ""
+        
+        try:
+            # 1차 필터: NSFW 검사 (빠르고 저렴)
+            nsfw_detector = get_nsfw_detector()
+            if nsfw_detector:
+                nsfw_result = nsfw_detector.analyze(str(image_path))
+                print(f"[INFO] NSFW 검사: {image['filename']}, "
+                      f"NSFW={nsfw_result.get('is_nsfw')}, "
+                      f"신뢰도={nsfw_result.get('confidence', 0):.1f}%")
+                
+                # NSFW 임계값 체크 (80% 이상)
+                if nsfw_detector.should_block(nsfw_result, threshold=80.0):
+                    is_blocked = True
+                    block_reason = "부적절한 이미지가 감지되었습니다 (NSFW)"
+                    print(f"[WARN] NSFW 차단: {image['filename']}")
+            
+            # 2차 검증: Vision API (NSFW가 의심되거나 추가 검증 필요 시)
+            # Vision API 실행 조건:
+            # 1. NSFW 검사 실패
+            # 2. NSFW 경계선 (60-80%)
+            # 3. NSFW 아님 + 신뢰도 낮음 (<80%) - 추가 검증 필요
+            should_use_vision = (
+                nsfw_result is None or  # NSFW 검사 실패 시 Vision으로 검증
+                (nsfw_result.get('is_nsfw') and 60 <= nsfw_result.get('confidence', 0) < 80) or  # NSFW 경계선
+                (not nsfw_result.get('is_nsfw') and nsfw_result.get('confidence', 0) < 80)  # 정상이지만 신뢰도 낮음
+            )
+            
+            # 비용 절감 옵션: 정상 판정 + 높은 신뢰도(80% 이상)면 Vision 건너뛰기
+            # 필요시 아래 주석을 해제하여 모든 정상 이미지에 Vision API 실행 가능
+            # should_use_vision = should_use_vision or not nsfw_result.get('is_nsfw')
+            
+            if should_use_vision:
+                vision_analyzer = get_vision_analyzer()
+                if vision_analyzer:
+                    vision_result = vision_analyzer.analyze_image(str(image_path))
+                    print(f"[INFO] Vision API 검사: {image['filename']}, "
+                          f"비윤리={vision_result.get('immoral_score', 0):.1f}, "
+                          f"스팸={vision_result.get('spam_score', 0):.1f}")
+                    
+                    # Vision API 차단 판단
+                    if vision_result.get('is_blocked', False):
+                        is_blocked = True
+                        _, block_reason = vision_analyzer.should_block_image(vision_result)
+                        print(f"[WARN] Vision API 차단: {image['filename']}")
+            
+            # 분석 시간 계산
+            response_time = time.time() - start_time
+            
+            # 로그 저장
+            log_id = image_logger.log_analysis(
+                filename=image['filename'],
+                original_name=image['original_name'],
+                file_size=image['size'],
+                board_id=board_id,
+                nsfw_result=nsfw_result,
+                vision_result=vision_result,
+                is_blocked=is_blocked,
+                block_reason=block_reason,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                response_time=response_time
+            )
+            
+            if log_id:
+                log_ids.append(log_id)
+            
+            # 차단된 이미지 발견 시 즉시 반환
+            if is_blocked:
+                # 모든 이미지 삭제
+                for img in saved_images:
+                    try:
+                        (UPLOAD_DIR / img['filename']).unlink()
+                        print(f"[INFO] 차단된 이미지 삭제: {img['filename']}")
+                    except:
+                        pass
+                
+                return True, block_reason, log_ids
+                
+        except Exception as e:
+            print(f"[ERROR] 이미지 분석 실패: {image['filename']}, {e}")
+            # 분석 실패 시 로그만 남기고 통과
+            try:
+                log_id = image_logger.log_analysis(
+                    filename=image['filename'],
+                    original_name=image['original_name'],
+                    file_size=image['size'],
+                    board_id=board_id,
+                    block_reason=f"분석 실패: {str(e)}",
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
+                if log_id:
+                    log_ids.append(log_id)
+            except:
+                pass
+    
+    return False, "", log_ids
 
 
 def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = None):
@@ -738,11 +1003,11 @@ async def get_post(request: Request, post_id: int):
         (post_id,)
     )
     
-    # 게시글 조회 (LEFT JOIN으로 탈퇴한 사용자 처리)
+    # 게시글 조회 (LEFT JOIN으로 탈퇴한 사용자 처리, images 컬럼 포함)
     post = execute_query("""
         SELECT 
             b.id, b.title, b.content, b.category, b.status,
-            b.like_count, b.view_count, b.created_at, b.updated_at,
+            b.like_count, b.view_count, b.created_at, b.updated_at, b.images,
             u.id as user_id, COALESCE(u.username, '탈퇴한 사용자') as username
         FROM board b
         LEFT JOIN users u ON b.user_id = u.id
@@ -754,6 +1019,14 @@ async def get_post(request: Request, post_id: int):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="게시글을 찾을 수 없습니다"
         )
+    
+    # 이미지 정보 파싱
+    images = []
+    if post.get('images'):
+        try:
+            images = json.loads(post['images']) if isinstance(post['images'], str) else post['images']
+        except (json.JSONDecodeError, TypeError):
+            images = []
     
     # 댓글 조회 (LEFT JOIN으로 탈퇴한 사용자 처리)
     comments = execute_query("""
@@ -811,15 +1084,22 @@ async def get_post(request: Request, post_id: int):
                 'id': post['user_id'],
                 'username': post['username']
             },
-            'is_author': is_author
+            'is_author': is_author,
+            'images': images
         },
         'comments': root_comments
     }
 
 
 @router.post("/board/posts")
-async def create_post(request: Request, data: PostCreate):
-    """게시글 작성 (로그인 필요)"""
+async def create_post(
+    request: Request,
+    title: str = Form(...),
+    content: str = Form(...),
+    category: str = Form("free"),
+    images: List[UploadFile] = File(default=[])
+):
+    """게시글 작성 (로그인 필요, 이미지 첨부 가능)"""
     
     # 인증 확인
     user = get_current_user(request)
@@ -830,29 +1110,86 @@ async def create_post(request: Request, data: PostCreate):
         )
     
     # 입력 검증
-    if not data.title or len(data.title) < 2:
+    if not title or len(title) < 2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="제목은 2자 이상이어야 합니다"
         )
     
-    if not data.content or len(data.content) < 5:
+    # 이미지 개수 검증
+    if len(images) > MAX_IMAGES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="내용은 5자 이상이어야 합니다"
+            detail=f"이미지는 최대 {MAX_IMAGES}개까지 업로드할 수 있습니다"
         )
     
-    # 비윤리/스팸 자동 분석 (동기 방식)
-    content_text = f"{data.title}\n{data.content}"
+    # 이미지 검증 및 저장
+    saved_images = []
+    for image in images:
+        if image.filename:  # 파일이 실제로 업로드된 경우
+            # 이미지 검증
+            is_valid, error_msg = validate_image(image)
+            if not is_valid:
+                # 이미 저장된 이미지 삭제
+                for saved_img in saved_images:
+                    try:
+                        (UPLOAD_DIR / saved_img["filename"]).unlink()
+                    except:
+                        pass
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg
+                )
+            
+            # 이미지 저장
+            try:
+                image_data = await save_image(image)
+                saved_images.append(image_data)
+            except HTTPException:
+                # 이미 저장된 이미지 삭제
+                for saved_img in saved_images:
+                    try:
+                        (UPLOAD_DIR / saved_img["filename"]).unlink()
+                    except:
+                        pass
+                raise
+    
+    # 텍스트 비윤리/스팸 자동 분석 (동기 방식)
+    content_text = f"{title}\n{content}"
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get('user-agent')
     content_status, analysis_result, block_reason = await analyze_and_log_content(content_text, client_ip, user_agent)
     
+    # 이미지 정보 JSON 변환
+    images_json = json.dumps(saved_images) if saved_images else None
+    
     # 게시글 생성 (분석된 status로 저장)
     post_id = execute_query("""
-        INSERT INTO board (user_id, title, content, category, status)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (user['user_id'], data.title, data.content, data.category, content_status))
+        INSERT INTO board (user_id, title, content, category, status, images)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (user['user_id'], title, content, category, content_status, images_json))
+    
+    # 이미지 윤리/스팸 분석 (하이브리드: NSFW + Vision API)
+    if saved_images:
+        images_blocked, image_block_reason, image_log_ids = await analyze_images_hybrid(
+            saved_images=saved_images,
+            board_id=post_id,
+            ip_address=client_ip,
+            user_agent=user_agent
+        )
+        
+        if images_blocked:
+            # 이미지가 차단된 경우 게시글도 차단 처리
+            execute_query(
+                "UPDATE board SET status = 'blocked' WHERE id = %s",
+                (post_id,)
+            )
+            return {
+                'success': False,
+                'message': f'게시글이 자동 차단되었습니다: {image_block_reason}',
+                'blocked': True,
+                'reason': image_block_reason
+            }
     
     # 이벤트 기록 (게시글 작성)
     try:
@@ -869,6 +1206,9 @@ async def create_post(request: Request, data: PostCreate):
     
     # 응답 메시지
     if content_status == 'blocked':
+        # 차단된 경우 업로드된 이미지도 삭제
+        if images_json:
+            delete_images(images_json)
         return {
             'success': False,
             'message': f'게시글이 자동 차단되었습니다: {block_reason}',
@@ -926,8 +1266,16 @@ async def check_post_status(request: Request, post_id: int):
 
 
 @router.put("/board/posts/{post_id}")
-async def update_post(request: Request, post_id: int, data: PostUpdate):
-    """게시글 수정 (작성자만)"""
+async def update_post(
+    request: Request,
+    post_id: int,
+    title: str = Form(None),
+    content: str = Form(None),
+    category: str = Form(None),
+    images: List[UploadFile] = File(default=[]),
+    deleted_images: str = Form(default="")  # JSON 문자열: 삭제할 이미지 파일명 목록
+):
+    """게시글 수정 (작성자만, 이미지 추가/삭제 가능)"""
     
     # 인증 확인
     user = get_current_user(request)
@@ -937,9 +1285,9 @@ async def update_post(request: Request, post_id: int, data: PostUpdate):
             detail="로그인이 필요합니다"
         )
     
-    # 게시글 조회
+    # 게시글 조회 (이미지 정보 포함)
     post = execute_query(
-        "SELECT user_id FROM board WHERE id = %s AND status = 'exposed'",
+        "SELECT user_id, images FROM board WHERE id = %s AND status = 'exposed'",
         (post_id,),
         fetch_one=True
     )
@@ -961,27 +1309,112 @@ async def update_post(request: Request, post_id: int, data: PostUpdate):
     update_fields = []
     params = []
     
-    if data.title is not None:
-        if len(data.title) < 2:
+    if title is not None:
+        if len(title) < 2:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="제목은 2자 이상이어야 합니다"
             )
         update_fields.append("title = %s")
-        params.append(data.title)
+        params.append(title)
     
-    if data.content is not None:
-        if len(data.content) < 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="내용은 5자 이상이어야 합니다"
-            )
+    if content is not None:
         update_fields.append("content = %s")
-        params.append(data.content)
+        params.append(content)
     
-    if data.category is not None:
+    if category is not None:
         update_fields.append("category = %s")
-        params.append(data.category)
+        params.append(category)
+    
+    # 기존 이미지 처리
+    existing_images = []
+    if post.get('images'):
+        try:
+            existing_images = json.loads(post['images']) if isinstance(post['images'], str) else post['images']
+        except (json.JSONDecodeError, TypeError):
+            existing_images = []
+    
+    # 삭제할 이미지 처리
+    if deleted_images:
+        try:
+            deleted_list = json.loads(deleted_images) if deleted_images else []
+            for filename in deleted_list:
+                # 실제 파일 삭제
+                file_path = UPLOAD_DIR / filename
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                        print(f"[INFO] 이미지 삭제: {filename}")
+                    except Exception as e:
+                        print(f"[WARN] 이미지 삭제 실패: {filename}, {e}")
+                
+                # 목록에서 제거
+                existing_images = [img for img in existing_images if img.get('filename') != filename]
+        except json.JSONDecodeError:
+            pass
+    
+    # 새 이미지 업로드
+    new_images = []
+    for image in images:
+        if image.filename:  # 파일이 실제로 업로드된 경우
+            # 이미지 검증
+            is_valid, error_msg = validate_image(image)
+            if not is_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg
+                )
+            
+            # 이미지 저장
+            try:
+                image_data = await save_image(image)
+                new_images.append(image_data)
+            except HTTPException:
+                raise
+    
+    # 기존 이미지 + 새 이미지 병합
+    all_images = existing_images + new_images
+    
+    # 최대 개수 검증
+    if len(all_images) > MAX_IMAGES:
+        # 새로 업로드된 이미지 삭제
+        for img in new_images:
+            try:
+                (UPLOAD_DIR / img['filename']).unlink()
+            except:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"이미지는 최대 {MAX_IMAGES}개까지 업로드할 수 있습니다"
+        )
+    
+    # 새 이미지 윤리/스팸 분석
+    if new_images:
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get('user-agent')
+        
+        images_blocked, image_block_reason, image_log_ids = await analyze_images_hybrid(
+            saved_images=new_images,
+            board_id=post_id,
+            ip_address=client_ip,
+            user_agent=user_agent
+        )
+        
+        if images_blocked:
+            # 새로 업로드된 이미지가 차단된 경우
+            # (이미 삭제됨, 게시글 상태는 변경하지 않음)
+            return {
+                'success': False,
+                'message': f'이미지가 차단되었습니다: {image_block_reason}',
+                'blocked': True,
+                'reason': image_block_reason
+            }
+    
+    # 이미지 정보 업데이트
+    if deleted_images or new_images:
+        images_json = json.dumps(all_images) if all_images else None
+        update_fields.append("images = %s")
+        params.append(images_json)
     
     if not update_fields:
         raise HTTPException(
@@ -1012,9 +1445,9 @@ async def delete_post(request: Request, post_id: int):
             detail="로그인이 필요합니다"
         )
     
-    # 게시글 조회
+    # 게시글 조회 (이미지 정보 포함)
     post = execute_query(
-        "SELECT user_id FROM board WHERE id = %s AND status != 'deleted'",
+        "SELECT user_id, images FROM board WHERE id = %s AND status != 'deleted'",
         (post_id,),
         fetch_one=True
     )
@@ -1037,6 +1470,11 @@ async def delete_post(request: Request, post_id: int):
         "UPDATE board SET status = 'deleted' WHERE id = %s",
         (post_id,)
     )
+    
+    # 첨부된 이미지 파일 삭제
+    if post.get('images'):
+        images_json = post['images'] if isinstance(post['images'], str) else json.dumps(post['images'])
+        delete_images(images_json)
     
     return {
         'success': True,

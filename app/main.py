@@ -66,6 +66,13 @@ if not STATIC_DIR.exists():
     (STATIC_DIR / "js").mkdir(exist_ok=True)
     (STATIC_DIR / "img").mkdir(exist_ok=True)
 
+# 업로드 디렉토리 생성 (게시판 이미지 첨부용)
+UPLOAD_DIR = STATIC_DIR / "uploads" / "board"
+if not UPLOAD_DIR.exists():
+    print(f"[INFO] {UPLOAD_DIR} 디렉토리를 생성합니다...")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[OK] 업로드 디렉토리 생성 완료: {UPLOAD_DIR}")
+
 # 정적 파일 마운트
 try:
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -75,7 +82,7 @@ except Exception as e:
 
 # 라우터 등록
 try:
-    from app.api import routes_public, routes_health, routes_api, routes_match, routes_auth, routes_board, routes_admin, routes_agent
+    from app.api import routes_public, routes_health, routes_api, routes_match, routes_auth, routes_board, routes_admin, routes_agent, routes_messages
     app.include_router(routes_public.router)
     app.include_router(routes_health.router)
     app.include_router(routes_api.router, prefix="/api")
@@ -84,7 +91,8 @@ try:
     app.include_router(routes_board.router, prefix="/api")  # 게시판 API
     app.include_router(routes_admin.router, prefix="/api")  # 관리자 API
     app.include_router(routes_agent.router, prefix="/api")  # Agent Chatbot API
-    print("[OK] 모든 라우터 등록 완료 (WMAA, Auth, Board, Admin, Agent 포함)")
+    app.include_router(routes_messages.router)  # 메시지 시스템 API
+    print("[OK] 모든 라우터 등록 완료 (WMAA, Auth, Board, Admin, Agent, Messages 포함)")
 except ImportError as e:
     print(f"[WARN] 라우터 임포트 실패: {e}")
     # 기본 라우트만 제공

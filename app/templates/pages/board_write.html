@@ -212,7 +212,16 @@
 
                 <div class="form-group">
                     <label for="content">내용</label>
-                    <textarea id="content" name="content" required minlength="5" placeholder="내용을 입력하세요"></textarea>
+                    <textarea id="content" name="content" placeholder="내용을 입력하세요"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="images">이미지 첨부 (최대 5개, 각 5MB)</label>
+                    <input type="file" id="images" name="images" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" multiple style="display: none;">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('images').click()">
+                        <i class="fas fa-image"></i> 이미지 선택
+                    </button>
+                    <div id="imagePreview" style="margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;"></div>
                 </div>
 
                 <div class="form-actions">
@@ -231,12 +240,104 @@
         const form = document.getElementById('postForm');
         const submitBtn = document.getElementById('submitBtn');
         const alert = document.getElementById('alert');
+        const imagesInput = document.getElementById('images');
+        const imagePreview = document.getElementById('imagePreview');
+        let selectedFiles = [];
+        let existingImages = [];  // 기존 이미지 목록
+        let deletedImages = [];   // 삭제할 이미지 파일명 목록
 
         // 수정 모드면 게시글 정보 로드
         if (isEditMode) {
             document.getElementById('pageTitle').textContent = '글 수정';
             submitBtn.textContent = '수정하기';
             loadPost(postId);
+        }
+
+        // 이미지 선택 이벤트
+        imagesInput.addEventListener('change', function(e) {
+            const files = Array.from(e.target.files);
+            
+            // 기존 이미지 + 새 이미지 개수 확인
+            const currentCount = existingImages.length - deletedImages.length + files.length;
+            if (currentCount > 5) {
+                showAlert('이미지는 최대 5개까지 선택할 수 있습니다');
+                imagesInput.value = '';
+                return;
+            }
+            
+            // 파일 크기 검증 (5MB)
+            const maxSize = 5 * 1024 * 1024;
+            for (const file of files) {
+                if (file.size > maxSize) {
+                    showAlert(`파일 "${file.name}"의 크기가 너무 큽니다. 최대 5MB까지 업로드 가능합니다.`);
+                    imagesInput.value = '';
+                    return;
+                }
+            }
+            
+            selectedFiles = files;
+            
+            // 수정 모드면 기존 이미지와 함께 표시
+            if (isEditMode) {
+                imagePreview.innerHTML = '';
+                displayExistingImages();
+            } else {
+                displayImagePreviews();
+            }
+        });
+
+        function displayImagePreviews() {
+            if (!isEditMode) {
+                imagePreview.innerHTML = '';
+            }
+            
+            selectedFiles.forEach((file, index) => {
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    const previewItem = document.createElement('div');
+                    previewItem.style.position = 'relative';
+                    previewItem.style.border = '1px solid #D1D5DB';
+                    previewItem.style.borderRadius = '8px';
+                    previewItem.style.overflow = 'hidden';
+                    previewItem.setAttribute('data-new-image', index);
+                    
+                    previewItem.innerHTML = `
+                        <img src="${e.target.result}" 
+                             style="width: 100%; height: 150px; object-fit: cover; display: block;">
+                        <button type="button" 
+                                onclick="removeImage(${index})" 
+                                style="position: absolute; top: 5px; right: 5px; 
+                                       background: rgba(239, 68, 68, 0.9); color: white; 
+                                       border: none; border-radius: 50%; width: 24px; height: 24px; 
+                                       cursor: pointer; font-size: 14px; line-height: 1;">
+                            ×
+                        </button>
+                        <div style="padding: 8px; background: #F9FAFB; font-size: 12px; 
+                                    color: #6B7280; text-overflow: ellipsis; overflow: hidden; 
+                                    white-space: nowrap;">
+                            ${file.name}
+                        </div>
+                    `;
+                    
+                    imagePreview.appendChild(previewItem);
+                };
+                
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function removeImage(index) {
+            const dt = new DataTransfer();
+            const files = Array.from(selectedFiles);
+            
+            files.splice(index, 1);
+            
+            files.forEach(file => dt.items.add(file));
+            imagesInput.files = dt.files;
+            selectedFiles = files;
+            
+            displayImagePreviews();
         }
 
         function showAlert(message, type = 'error') {
@@ -261,6 +362,12 @@
                     document.getElementById('title').value = post.title;
                     document.getElementById('content').value = post.content;
 
+                    // 기존 이미지 로드
+                    if (post.images && post.images.length > 0) {
+                        existingImages = post.images;
+                        displayExistingImages();
+                    }
+
                     // 작성자가 아니면 수정 불가
                     if (!post.is_author) {
                         showAlert('게시글을 수정할 권한이 없습니다');
@@ -277,6 +384,52 @@
             } catch (error) {
                 console.error('Failed to load post:', error);
                 showAlert('게시글을 불러오는 중 오류가 발생했습니다');
+            }
+        }
+
+        function displayExistingImages() {
+            existingImages.forEach((image, index) => {
+                if (deletedImages.includes(image.filename)) return; // 삭제된 이미지는 표시 안함
+                
+                const previewItem = document.createElement('div');
+                previewItem.style.position = 'relative';
+                previewItem.style.border = '1px solid #D1D5DB';
+                previewItem.style.borderRadius = '8px';
+                previewItem.style.overflow = 'hidden';
+                previewItem.setAttribute('data-existing-image', image.filename);
+                
+                previewItem.innerHTML = `
+                    <img src="/static/uploads/board/${image.filename}" 
+                         style="width: 100%; height: 150px; object-fit: cover; display: block;">
+                    <button type="button" 
+                            onclick="removeExistingImage('${image.filename}')" 
+                            style="position: absolute; top: 5px; right: 5px; 
+                                   background: rgba(239, 68, 68, 0.9); color: white; 
+                                   border: none; border-radius: 50%; width: 24px; height: 24px; 
+                                   cursor: pointer; font-size: 14px; line-height: 1;">
+                        ×
+                    </button>
+                    <div style="padding: 8px; background: #F9FAFB; font-size: 12px; 
+                                color: #6B7280; text-overflow: ellipsis; overflow: hidden; 
+                                white-space: nowrap;">
+                        ${image.original_name}
+                    </div>
+                `;
+                
+                imagePreview.appendChild(previewItem);
+            });
+            
+            // 새로 선택된 이미지도 표시
+            displayImagePreviews();
+        }
+
+        function removeExistingImage(filename) {
+            deletedImages.push(filename);
+            
+            // UI에서 제거
+            const element = document.querySelector(`[data-existing-image="${filename}"]`);
+            if (element) {
+                element.remove();
             }
         }
 
@@ -299,11 +452,6 @@
                 return;
             }
 
-            if (content.length < 5) {
-                showAlert('내용은 5자 이상이어야 합니다');
-                return;
-            }
-
             const originalBtnText = submitBtn.textContent;
             submitBtn.disabled = true;
             const loadingText = isEditMode 
@@ -315,14 +463,30 @@
                 const url = isEditMode ? `/api/board/posts/${postId}` : '/api/board/posts';
                 const method = isEditMode ? 'PUT' : 'POST';
 
-                const response = await fetch(url, {
-                    method: method,
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ title, content, category })
+                let requestOptions;
+                
+                // 작성/수정 모두 FormData로 전송
+                const formData = new FormData();
+                formData.append('title', title);
+                formData.append('content', content);
+                formData.append('category', category);
+                
+                // 이미지 추가
+                selectedFiles.forEach(file => {
+                    formData.append('images', file);
                 });
+                
+                // 수정 모드: 삭제할 이미지 목록 추가
+                if (isEditMode && deletedImages.length > 0) {
+                    formData.append('deleted_images', JSON.stringify(deletedImages));
+                }
+                
+                requestOptions = {
+                    method: method,
+                    body: formData
+                };
 
+                const response = await fetch(url, requestOptions);
                 const data = await response.json();
 
                 if (response.ok && data.success) {
