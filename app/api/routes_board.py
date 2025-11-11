@@ -13,6 +13,7 @@ import pymysql
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
+import time
 
 router = APIRouter(tags=["board"])
 
@@ -55,10 +56,30 @@ def should_block_content(result: dict) -> Tuple[bool, str]:
     Returns:
         (차단여부, 차단사유)
     """
+    # 즉시 차단 (auto_blocked) 최우선 체크
+    if result.get('auto_blocked', False):
+        auto_block_reason = result.get('auto_block_reason', 'unknown')
+        if auto_block_reason == 'immoral':
+            return True, "관리자 확정 비윤리 사례와 유사하여 즉시 차단되었습니다"
+        elif auto_block_reason == 'spam':
+            return True, "관리자 확정 스팸 사례와 유사하여 즉시 차단되었습니다"
+        else:
+            return True, "관리자 확정 사례와 유사하여 즉시 차단되었습니다"
+    
     final_score = result.get('final_score', 0)
     final_confidence = result.get('final_confidence', 0)
     spam_score = result.get('spam_score', 0)
     spam_confidence = result.get('spam_confidence', 0)
+    
+    # None 값 처리 (즉시 차단이 아닌데 None이면 0으로 처리)
+    if final_score is None:
+        final_score = 0
+    if final_confidence is None:
+        final_confidence = 0
+    if spam_score is None:
+        spam_score = 0
+    if spam_confidence is None:
+        spam_confidence = 0
     
     # 차단 기준 1: 비윤리 점수 >= 80 AND 신뢰도 >= 80
     if final_score >= 80 and final_confidence >= 80:
@@ -75,9 +96,14 @@ def should_block_content(result: dict) -> Tuple[bool, str]:
     return False, ""
 
 
-async def analyze_and_log_content(text: str, ip_address: str = None) -> Tuple[str, dict, str]:
+async def analyze_and_log_content(text: str, ip_address: str = None, user_agent: str = None) -> Tuple[str, dict, str]:
     """
     콘텐츠 분석 및 로그 저장
+    
+    Args:
+        text: 분석할 텍스트
+        ip_address: 클라이언트 IP 주소
+        user_agent: User Agent 문자열
     
     Returns:
         (status, result, block_reason)
@@ -88,8 +114,14 @@ async def analyze_and_log_content(text: str, ip_address: str = None) -> Tuple[st
             print("[WARN] Ethics analyzer 없음 - 분석 건너뜀")
             return 'exposed', None, ""
         
+        # 분석 시간 측정 시작
+        start_time = time.time()
+        
         # 분석 실행
         result = analyzer.analyze(text)
+        
+        # 응답 시간 계산
+        response_time = time.time() - start_time
         
         # 차단 여부 결정
         should_block, block_reason = should_block_content(result)
@@ -97,18 +129,62 @@ async def analyze_and_log_content(text: str, ip_address: str = None) -> Tuple[st
         
         # 로그 저장 (ethics_logs 테이블)
         try:
-            db_logger.log_analysis(
+            log_id = db_logger.log_analysis(
                 text=text,
                 score=result['final_score'],
                 confidence=result['final_confidence'],
                 spam=result['spam_score'],
                 spam_confidence=result['spam_confidence'],
                 types=result.get('types', []),
-                ip_address=ip_address
+                ip_address=ip_address,
+                user_agent=user_agent,
+                response_time=response_time,
+                rag_applied=result.get('adjustment_applied', False),
+                auto_blocked=result.get('auto_blocked', False)
             )
-            print(f"[INFO] Ethics 분석 완료 - status: {status}, 비윤리: {result['final_score']:.1f}, 스팸: {result['spam_score']:.1f}")
+            
+            # RAG 상세 정보 저장 (RAG가 적용된 경우)
+            if result.get('adjustment_applied', False) and log_id:
+                try:
+                    db_logger.log_rag_details(
+                        ethics_log_id=log_id,
+                        similar_case_count=result.get('similar_cases_count', 0),
+                        max_similarity=result.get('max_similarity', 0.0),  # 이미 0-1 범위
+                        original_immoral_score=result.get('base_score', result['final_score']),
+                        original_spam_score=result.get('base_spam_score', result.get('spam_score', 0.0)),  # RAG 보정 전 스팸 점수
+                        adjusted_immoral_score=result.get('adjusted_immoral_score', result['final_score']),
+                        adjusted_spam_score=result.get('adjusted_spam_score', result['spam_score']),
+                        adjustment_weight=result.get('adjustment_weight', 0.0),
+                        confidence_boost=0.0,  # 별도 계산 필요 시 추가
+                        similar_cases=result.get('rag_similar_cases', []),
+                        rag_response_time=response_time
+                    )
+                except Exception as rag_log_error:
+                    print(f"[WARN] RAG 로그 저장 실패: {rag_log_error}")
+            
+            # 즉시 차단인 경우 점수가 None이므로 출력 형식 변경
+            immoral_str = f"{result['final_score']:.1f}" if result.get('final_score') is not None else "N/A (즉시차단)"
+            spam_str = f"{result['spam_score']:.1f}" if result.get('spam_score') is not None else "N/A (즉시차단)"
+            print(f"[INFO] Ethics 분석 완료 - status: {status}, 비윤리: {immoral_str}, 스팸: {spam_str}, 응답시간: {response_time:.3f}초")
         except Exception as log_error:
             print(f"[WARN] 로그 저장 실패: {log_error}")
+        
+        # ⚡ 신뢰도 70 이상인 케이스 자동 저장 (RAG 벡터DB) - 비동기로 백그라운드 처리
+        # 즉시 차단 케이스는 이미 유사 사례가 있으므로 저장 건너뜀
+        try:
+            if (analyzer and hasattr(analyzer, '_auto_save_high_confidence_case_async') 
+                and not result.get('auto_blocked', False)
+                and result.get('final_score') is not None
+                and result.get('spam_score') is not None):
+                analyzer._auto_save_high_confidence_case_async(
+                    text=text,
+                    immoral_score=result['final_score'],
+                    spam_score=result['spam_score'],
+                    confidence=result['final_confidence'],
+                    spam_confidence=result['spam_confidence']
+                )
+        except Exception as save_error:
+            print(f"[WARN] 자동 저장 실패: {save_error}")
         
         return status, result, block_reason
         
@@ -132,8 +208,14 @@ def analyze_and_update_post(post_id: int, text: str, ip_address: str = None):
             print(f"[WARN] 게시글 {post_id} - Analyzer 없음, 백그라운드 분석 건너뜀")
             return
         
+        # 분석 시간 측정 시작
+        start_time = time.time()
+        
         # 분석 실행
         result = analyzer.analyze(text)
+        
+        # 응답 시간 계산
+        response_time = time.time() - start_time
         
         # 차단 여부 결정
         should_block, block_reason = should_block_content(result)
@@ -147,19 +229,64 @@ def analyze_and_update_post(post_id: int, text: str, ip_address: str = None):
         
         # 로그 저장
         try:
-            db_logger.log_analysis(
+            log_id = db_logger.log_analysis(
                 text=text,
                 score=result['final_score'],
                 confidence=result['final_confidence'],
                 spam=result['spam_score'],
                 spam_confidence=result['spam_confidence'],
                 types=result.get('types', []),
-                ip_address=ip_address
+                ip_address=ip_address,
+                user_agent=None,  # 백그라운드 작업이므로 user_agent 없음
+                response_time=response_time,
+                rag_applied=result.get('adjustment_applied', False),
+                auto_blocked=result.get('auto_blocked', False)
             )
+            
+            # RAG 상세 정보 저장 (RAG가 적용된 경우)
+            if result.get('adjustment_applied', False) and log_id:
+                try:
+                    db_logger.log_rag_details(
+                        ethics_log_id=log_id,
+                        similar_case_count=result.get('similar_cases_count', 0),
+                        max_similarity=result.get('max_similarity', 0.0),  # 이미 0-1 범위
+                        original_immoral_score=result.get('base_score', result['final_score']),
+                        original_spam_score=result.get('base_spam_score', result.get('spam_score', 0.0)),  # RAG 보정 전 스팸 점수
+                        adjusted_immoral_score=result.get('adjusted_immoral_score', result['final_score']),
+                        adjusted_spam_score=result.get('adjusted_spam_score', result['spam_score']),
+                        adjustment_weight=result.get('adjustment_weight', 0.0),
+                        confidence_boost=0.0,  # 별도 계산 필요 시 추가
+                        similar_cases=result.get('rag_similar_cases', []),
+                        rag_response_time=response_time
+                    )
+                except Exception as rag_log_error:
+                    print(f"[WARN] 게시글 {post_id} - RAG 로그 저장 실패: {rag_log_error}")
         except Exception as log_error:
             print(f"[WARN] 게시글 {post_id} - 로그 저장 실패: {log_error}")
         
-        print(f"[INFO] 백그라운드 분석 완료 - post_id: {post_id}, status: {status}, 비윤리: {result['final_score']:.1f}, 스팸: {result['spam_score']:.1f}")
+        # ⚡ 신뢰도 70 이상인 케이스 자동 저장 (RAG 벡터DB) - 비동기로 백그라운드 처리
+        # 즉시 차단 케이스는 이미 유사 사례가 있으므로 저장 건너뜀
+        try:
+            if (analyzer and hasattr(analyzer, '_auto_save_high_confidence_case_async')
+                and not result.get('auto_blocked', False)
+                and result.get('final_score') is not None
+                and result.get('spam_score') is not None):
+                analyzer._auto_save_high_confidence_case_async(
+                    text=text,
+                    immoral_score=result['final_score'],
+                    spam_score=result['spam_score'],
+                    confidence=result['final_confidence'],
+                    spam_confidence=result['spam_confidence'],
+                    post_id=str(post_id),
+                    user_id=""
+                )
+        except Exception as save_error:
+            print(f"[WARN] 게시글 {post_id} - 자동 저장 실패: {save_error}")
+        
+        # 즉시 차단인 경우 점수가 None이므로 출력 형식 변경
+        immoral_str = f"{result['final_score']:.1f}" if result.get('final_score') is not None else "N/A (즉시차단)"
+        spam_str = f"{result['spam_score']:.1f}" if result.get('spam_score') is not None else "N/A (즉시차단)"
+        print(f"[INFO] 백그라운드 분석 완료 - post_id: {post_id}, status: {status}, 비윤리: {immoral_str}, 스팸: {spam_str}, 응답시간: {response_time:.3f}초")
         
     except Exception as e:
         print(f"[ERROR] 게시글 {post_id} - 백그라운드 분석 실패: {e}")
@@ -180,8 +307,14 @@ def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = Non
             print(f"[WARN] 댓글 {comment_id} - Analyzer 없음, 백그라운드 분석 건너뜀")
             return
         
+        # 분석 시간 측정 시작
+        start_time = time.time()
+        
         # 분석 실행
         result = analyzer.analyze(text)
+        
+        # 응답 시간 계산
+        response_time = time.time() - start_time
         
         # 차단 여부 결정
         should_block, block_reason = should_block_content(result)
@@ -202,12 +335,38 @@ def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = Non
                 spam=result['spam_score'],
                 spam_confidence=result['spam_confidence'],
                 types=result.get('types', []),
-                ip_address=ip_address
+                ip_address=ip_address,
+                user_agent=None,  # 백그라운드 작업이므로 user_agent 없음
+                response_time=response_time,
+                rag_applied=result.get('adjustment_applied', False),
+                auto_blocked=result.get('auto_blocked', False)
             )
         except Exception as log_error:
             print(f"[WARN] 댓글 {comment_id} - 로그 저장 실패: {log_error}")
         
-        print(f"[INFO] 백그라운드 분석 완료 - comment_id: {comment_id}, status: {status}, 비윤리: {result['final_score']:.1f}, 스팸: {result['spam_score']:.1f}")
+        # ⚡ 신뢰도 70 이상인 케이스 자동 저장 (RAG 벡터DB) - 비동기로 백그라운드 처리
+        # 즉시 차단 케이스는 이미 유사 사례가 있으므로 저장 건너뜀
+        try:
+            if (analyzer and hasattr(analyzer, '_auto_save_high_confidence_case_async')
+                and not result.get('auto_blocked', False)
+                and result.get('final_score') is not None
+                and result.get('spam_score') is not None):
+                analyzer._auto_save_high_confidence_case_async(
+                    text=text,
+                    immoral_score=result['final_score'],
+                    spam_score=result['spam_score'],
+                    confidence=result['final_confidence'],
+                    spam_confidence=result['spam_confidence'],
+                    post_id=str(comment_id),
+                    user_id=""
+                )
+        except Exception as save_error:
+            print(f"[WARN] 댓글 {comment_id} - 자동 저장 실패: {save_error}")
+        
+        # 즉시 차단인 경우 점수가 None이므로 출력 형식 변경
+        immoral_str = f"{result['final_score']:.1f}" if result.get('final_score') is not None else "N/A (즉시차단)"
+        spam_str = f"{result['spam_score']:.1f}" if result.get('spam_score') is not None else "N/A (즉시차단)"
+        print(f"[INFO] 백그라운드 분석 완료 - comment_id: {comment_id}, status: {status}, 비윤리: {immoral_str}, 스팸: {spam_str}, 응답시간: {response_time:.3f}초")
         
     except Exception as e:
         print(f"[ERROR] 댓글 {comment_id} - 백그라운드 분석 실패: {e}")
@@ -409,8 +568,8 @@ class CommentUpdate(BaseModel):
 async def get_posts(
     request: Request,
     category: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20
+    page: Optional[int] = None,
+    limit: Optional[int] = None
 ):
     """
     게시글 목록 조회
@@ -420,6 +579,12 @@ async def get_posts(
         page: 페이지 번호 (기본 1)
         limit: 페이지당 게시글 수 (기본 20)
     """
+    # 파라미터 기본값 설정
+    if page is None or page < 1:
+        page = 1
+    if limit is None or limit < 1 or limit > 100:
+        limit = 20
+    
     offset = (page - 1) * limit
     
     # 기본 쿼리 (LEFT JOIN으로 탈퇴한 사용자 처리)
@@ -482,6 +647,152 @@ async def get_posts(
             'total_pages': (total + limit - 1) // limit
         }
     }
+
+
+@router.get("/board/search-results")
+async def get_search_result_posts(
+    request: Request,
+    post_ids: str,
+    page: int = 1,
+    limit: int = 20,
+    sort_by: str = "latest"
+):
+    """
+    검색 결과 기반 게시글 조회
+    
+    Query Params:
+        post_ids: 쉼표로 구분된 게시글 ID 목록
+        page: 페이지 번호 (기본 1)
+        limit: 페이지당 게시글 수 (기본 20)
+        sort_by: 정렬 방식 (latest, popular, similarity)
+    """
+    try:
+        # post_ids 파싱
+        if not post_ids.strip():
+            return {
+                'success': True,
+                'posts': [],
+                'pagination': {
+                    'page': page,
+                    'limit': limit,
+                    'total': 0,
+                    'total_pages': 0
+                }
+            }
+        
+        id_list = [int(id.strip()) for id in post_ids.split(',') if id.strip().isdigit()]
+        
+        if not id_list:
+            return {
+                'success': True,
+                'posts': [],
+                'pagination': {
+                    'page': page,
+                    'limit': limit,
+                    'total': 0,
+                    'total_pages': 0
+                }
+            }
+        
+        # IN 절을 위한 플레이스홀더 생성
+        placeholders = ','.join(['%s'] * len(id_list))
+        
+        # 기본 쿼리
+        query = f"""
+            SELECT 
+                b.id, b.title, b.content, b.category, b.status,
+                b.like_count, b.view_count, b.created_at, b.updated_at,
+                u.id as user_id, COALESCE(u.username, '탈퇴한 사용자') as username
+            FROM board b
+            LEFT JOIN users u ON b.user_id = u.id
+            WHERE b.status = 'exposed' AND b.id IN ({placeholders})
+        """
+        
+        # 정렬 추가
+        if sort_by == "latest":
+            query += " ORDER BY b.created_at DESC"
+        elif sort_by == "popular":
+            query += " ORDER BY (b.like_count + b.view_count) DESC, b.created_at DESC"
+        elif sort_by == "similarity":
+            # 검색 결과 순서 유지 (FIELD 함수 사용)
+            field_order = ','.join(map(str, id_list))
+            query += f" ORDER BY FIELD(b.id, {field_order})"
+        else:
+            query += " ORDER BY b.created_at DESC"
+        
+        posts = execute_query(query, tuple(id_list), fetch_all=True)
+        
+        # 결과 포맷팅 및 메타데이터 추가
+        formatted_posts = []
+        board_count = 0
+        comment_count = 0
+        
+        for post in posts:
+            # 문서 타입 결정 (기본값: board)
+            doc_type = 'board'  # 현재는 게시글만 검색하므로 board로 고정
+            
+            if doc_type == 'board':
+                board_count += 1
+            else:
+                comment_count += 1
+            
+            formatted_posts.append({
+                'id': post['id'],
+                'title': post['title'],
+                'content': post['content'][:200],  # 미리보기용 200자
+                'category': post['category'],
+                'like_count': post['like_count'],
+                'view_count': post['view_count'],
+                'created_at': post['created_at'].isoformat() if post['created_at'] else None,
+                'updated_at': post['updated_at'].isoformat() if post['updated_at'] else None,
+                'author': {
+                    'id': post['user_id'],
+                    'username': post['username']
+                },
+                # 검색 메타데이터 추가
+                'doc_type': doc_type,
+                'similarity_score': 100 - (id_list.index(post['id']) * 10) if post['id'] in id_list else 0,
+                'search_method': 'ensemble',
+                'chunk_index': 0,
+                'chunk_count': 1
+            })
+        
+        total = len(formatted_posts)
+        
+        # 검색 메타데이터
+        search_metadata = {
+            'search_method': 'BM25+Vector 앙상블',
+            'total_results': total,
+            'board_count': board_count,
+            'comment_count': comment_count,
+            'search_time_ms': 0  # 실제 검색 시간은 프론트엔드에서 계산
+        }
+        
+        return {
+            'success': True,
+            'posts': formatted_posts,
+            'search_metadata': search_metadata,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'total_pages': (total + limit - 1) // limit if total > 0 else 0
+            }
+        }
+        
+    except Exception as e:
+        print(f"[ERROR] 검색 결과 조회 실패: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'posts': [],
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': 0,
+                'total_pages': 0
+            }
+        }
 
 
 @router.get("/board/posts/{post_id}")
@@ -601,7 +912,8 @@ async def create_post(request: Request, data: PostCreate):
     # 비윤리/스팸 자동 분석 (동기 방식)
     content_text = f"{data.title}\n{data.content}"
     client_ip = request.client.host if request.client else None
-    content_status, analysis_result, block_reason = await analyze_and_log_content(content_text, client_ip)
+    user_agent = request.headers.get('user-agent')
+    content_status, analysis_result, block_reason = await analyze_and_log_content(content_text, client_ip, user_agent)
     
     # 게시글 생성 (분석된 status로 저장)
     post_id = execute_query("""
@@ -897,7 +1209,8 @@ async def create_comment(request: Request, post_id: int, data: CommentCreate):
     
     # 비윤리/스팸 자동 분석 (동기 방식)
     client_ip = request.client.host if request.client else None
-    content_status, analysis_result, block_reason = await analyze_and_log_content(data.content, client_ip)
+    user_agent = request.headers.get('user-agent')
+    content_status, analysis_result, block_reason = await analyze_and_log_content(data.content, client_ip, user_agent)
     
     # 댓글 생성 (분석된 status로 저장)
     comment_id = execute_query("""

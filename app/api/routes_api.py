@@ -534,58 +534,115 @@ class EthicsAnalyzeRequest(BaseModel):
             }
         }
 
+class RagSimilarCase(BaseModel):
+    sentence: str
+    similarity: float
+    immoral_score: float
+    spam_score: float
+    confidence: float
+    confirmed: bool
+    feedback_type: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class RagAnalysis(BaseModel):
+    enabled: bool
+    adjustment_applied: bool
+    adjustment_weight: float
+    similar_cases_count: int
+    max_similarity: float
+    adjusted_score: Optional[float] = None
+    adjusted_spam_score: Optional[float] = None
+    similar_cases: List[RagSimilarCase] = Field(default_factory=list)
+
+
 class DetailedAnalysis(BaseModel):
     """상세 분석 정보"""
-    bert_score: float
-    bert_confidence: float
-    llm_score: float
-    llm_confidence: float
-    llm_spam_score: float
-    rule_spam_score: float
-    base_score: float
-    profanity_boost: float
+    bert_score: Optional[float] = None
+    bert_confidence: Optional[float] = None
+    llm_score: Optional[float] = None
+    llm_confidence: Optional[float] = None
+    llm_spam_score: Optional[float] = None
+    rule_spam_score: Optional[float] = None
+    base_score: Optional[float] = None
+    profanity_boost: Optional[float] = None
     weights: dict
     spam_weights: dict
+    rag: RagAnalysis
 
 class EthicsAnalyzeResponse(BaseModel):
     """Ethics 분석 응답 모델"""
     text: str
-    score: float = Field(..., description="비윤리 점수 (0-100)")
-    confidence: float = Field(..., description="비윤리 신뢰도 (0-100)")
-    spam: float = Field(..., description="스팸 지수 (0-100)")
-    spam_confidence: float = Field(..., description="스팸 신뢰도 (0-100)")
+    score: Optional[float] = Field(None, description="비윤리 점수 (0-100, 즉시 차단 시 null)")
+    confidence: Optional[float] = Field(None, description="비윤리 신뢰도 (0-100, 즉시 차단 시 null)")
+    spam: Optional[float] = Field(None, description="스팸 지수 (0-100, 즉시 차단 시 null)")
+    spam_confidence: Optional[float] = Field(None, description="스팸 신뢰도 (0-100, 즉시 차단 시 null)")
     types: List[str] = Field(..., description="분석 유형 목록")
+    auto_blocked: Optional[bool] = Field(False, description="즉시 차단 여부")
     detailed: DetailedAnalysis = Field(..., description="상세 분석 정보")
 
 
 def simplify_result(result: dict) -> dict:
     """분석 결과를 간결한 형식으로 변환 (소수점 1자리)"""
+    rag_similar_cases = []
+    for case in result.get('rag_similar_cases', []) or []:
+        rag_similar_cases.append({
+            'sentence': case.get('sentence', ''),
+            'similarity': round(case.get('similarity', 0.0), 3),
+            'immoral_score': round(case.get('immoral_score', 0.0), 1),
+            'spam_score': round(case.get('spam_score', 0.0), 1),
+            'confidence': round(case.get('confidence', 0.0), 1),
+            'confirmed': bool(case.get('confirmed', False)),
+            'feedback_type': case.get('feedback_type'),
+            'created_at': case.get('created_at')
+        })
+
+    adjustment_applied = bool(result.get('adjustment_applied', False))
+    auto_blocked = bool(result.get('auto_blocked', False))
+    
+    # 즉시 차단 케이스는 None 값을 그대로 반환
+    def safe_round(value, digits=1):
+        """None-safe rounding"""
+        return round(value, digits) if value is not None else None
+    
     return {
         'text': result['text'],
-        'score': round(result['final_score'], 1),
-        'confidence': round(result['final_confidence'], 1),
-        'spam': round(result['spam_score'], 1),
-        'spam_confidence': round(result['spam_confidence'], 1),
-        'types': result['types'],
+        'score': safe_round(result.get('final_score')),
+        'confidence': safe_round(result.get('final_confidence')),
+        'spam': safe_round(result.get('spam_score')),
+        'spam_confidence': safe_round(result.get('spam_confidence')),
+        'types': result.get('types', []),
+        'auto_blocked': auto_blocked,
         # 상세 정보 추가
         'detailed': {
-            'bert_score': round(result['bert_score'], 1),
-            'bert_confidence': round(result['bert_confidence'], 1),
-            'llm_score': round(result['llm_score'], 1),
-            'llm_confidence': round(result['llm_confidence'], 1),
-            'llm_spam_score': round(result['llm_spam_score'], 1),
-            'rule_spam_score': round(result['rule_spam_score'], 1),
-            'base_score': round(result['base_score'], 1),
-            'profanity_boost': round(result['profanity_boost'], 1),
+            'bert_score': safe_round(result.get('bert_score')),
+            'bert_confidence': safe_round(result.get('bert_confidence')),
+            'llm_score': safe_round(result.get('llm_score', 0.0)) if not auto_blocked else None,
+            'llm_confidence': safe_round(result.get('llm_confidence', 0.0)) if not auto_blocked else None,
+            'llm_spam_score': safe_round(result.get('llm_spam_score', 0.0)) if not auto_blocked else None,
+            'rule_spam_score': safe_round(result.get('rule_spam_score')),
+            'base_score': safe_round(result.get('base_score')),
+            'profanity_boost': safe_round(result.get('profanity_boost')),
             'weights': {
-                'bert': round(result['weights']['bert'], 2),
-                'llm': round(result['weights']['llm'], 2)
+                'bert': round(result.get('weights', {}).get('bert', 0.0), 2),
+                'llm': round(result.get('weights', {}).get('llm', 0.0), 2)
             },
             'spam_weights': {
-                'llm': 0.6 if result['rule_spam_score'] < 80 else 0.3,
-                'rule': 0.4 if result['rule_spam_score'] < 80 else 0.7
+                'llm': 0.6 if result.get('rule_spam_score', 0) < 80 else 0.3,
+                'rule': 0.4 if result.get('rule_spam_score', 0) < 80 else 0.7
+            },
+            'rag': {
+                'enabled': bool(result.get('rag_enabled', False)),
+                'adjustment_applied': adjustment_applied,
+                'adjustment_weight': round(result.get('adjustment_weight', 0.0), 2) if adjustment_applied else 0.0,
+                'similar_cases_count': result.get('similar_cases_count', 0),
+                'max_similarity': round(result.get('max_similarity', 0.0), 2),
+                'adjusted_score': safe_round(result.get('adjusted_immoral_score')) if adjustment_applied and result.get('adjusted_immoral_score') is not None else None,
+                'adjusted_spam_score': safe_round(result.get('adjusted_spam_score')) if adjustment_applied and result.get('adjusted_spam_score') is not None else None,
+                'similar_cases': rag_similar_cases
             }
-        }
+        },
+        'rag_applied': adjustment_applied
     }
 
 
@@ -626,7 +683,7 @@ async def ethics_analyze(request_data: EthicsAnalyzeRequest, request: Request):
         # 로그 저장
         try:
             from ethics.ethics_db_logger import db_logger
-            db_logger.log_analysis(
+            log_id = db_logger.log_analysis(
                 text=simplified['text'],
                 score=simplified['score'],
                 confidence=simplified['confidence'],
@@ -635,8 +692,30 @@ async def ethics_analyze(request_data: EthicsAnalyzeRequest, request: Request):
                 types=simplified['types'],
                 ip_address=request.client.host,
                 user_agent=request.headers.get('user-agent'),
-                response_time=response_time
+                response_time=response_time,
+                rag_applied=simplified.get('rag_applied', False),
+                auto_blocked=result.get('auto_blocked', False)
             )
+            
+            # RAG 상세 정보 저장 (RAG가 적용된 경우)
+            if simplified.get('rag_applied', False) and log_id:
+                try:
+                    rag_info = simplified.get('detailed', {}).get('rag', {})
+                    db_logger.log_rag_details(
+                        ethics_log_id=log_id,
+                        similar_case_count=rag_info.get('similar_cases_count', 0),
+                        max_similarity=rag_info.get('max_similarity', 0.0),  # 이미 0-1 범위
+                        original_immoral_score=simplified.get('detailed', {}).get('base_score', simplified['score']),
+                        original_spam_score=result.get('base_spam_score', simplified.get('spam', 0.0)),  # RAG 보정 전 스팸 점수
+                        adjusted_immoral_score=rag_info.get('adjusted_score', simplified['score']),
+                        adjusted_spam_score=rag_info.get('adjusted_spam_score', simplified['spam']),
+                        adjustment_weight=rag_info.get('adjustment_weight', 0.0),
+                        confidence_boost=0.0,  # 별도 계산 필요 시 추가
+                        similar_cases=rag_info.get('similar_cases', []),
+                        rag_response_time=response_time
+                    )
+                except Exception as rag_log_error:
+                    print(f"[WARN] RAG 로그 저장 실패: {rag_log_error}")
         except Exception as log_error:
             print(f"[WARN] 로그 저장 실패: {log_error}")
         
@@ -666,7 +745,7 @@ async def get_ethics_logs(
     """
     try:
         from ethics.ethics_db_logger import db_logger
-        logs = db_logger.get_logs(
+        logs = db_logger.get_logs_with_rag(
             limit=limit,
             offset=offset,
             min_score=min_score,

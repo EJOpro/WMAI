@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from app.auth import is_admin
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -55,7 +56,19 @@ async def ethics_analyze(request: Request):
 
 @router.get("/ethics_dashboard", response_class=HTMLResponse)
 async def ethics_dashboard(request: Request):
-    """로그기록 대시보드"""
+    """로그기록 대시보드 (관리자 전용)"""
+    # 관리자 권한 체크
+    if not is_admin(request):
+        # 관리자가 아닌 경우 권한 없음 페이지로 이동
+        return templates.TemplateResponse(
+            "pages/ethics_dashboard.html",
+            {
+                "request": request, 
+                "title": "로그기록 대시보드",
+                "unauthorized": True  # 권한 없음 플래그
+            }
+        )
+    
     return templates.TemplateResponse(
         "pages/ethics_dashboard.html",
         {"request": request, "title": "로그기록 대시보드"}
@@ -85,13 +98,14 @@ async def reports_admin(request: Request):
         {"request": request, "title": "신고 관리"}
     )
 
-@router.get("/admin/rag-check", response_class=HTMLResponse)
-async def admin_rag_check(request: Request):
-    """RAG 기반 위험도 분석 테스트 페이지"""
-    return templates.TemplateResponse(
-        "pages/admin_rag_check.html",
-        {"request": request, "title": "RAG 위험도 분석"}
-    )
+# RAG 관련 코드 (테스트 완료 전까지 주석 처리)
+# @router.get("/admin/rag-check", response_class=HTMLResponse)
+# async def admin_rag_check(request: Request):
+#     """RAG 기반 위험도 분석 테스트 페이지"""
+#     return templates.TemplateResponse(
+#         "pages/admin_rag_check.html",
+#         {"request": request, "title": "RAG 위험도 분석"}
+#     )
 
 
 @router.get("/admin/rag-auto", response_class=HTMLResponse)
@@ -126,6 +140,14 @@ async def board_list(request: Request):
         {"request": request, "title": "게시판"}
     )
 
+@router.get("/board/search", response_class=HTMLResponse)
+async def board_search(request: Request):
+    """검색 결과 게시판 페이지"""
+    return templates.TemplateResponse(
+        "pages/board_search.html",
+        {"request": request, "title": "검색 결과 게시판"}
+    )
+
 @router.get("/board/write", response_class=HTMLResponse)
 async def board_write(request: Request):
     """게시글 작성 페이지"""
@@ -156,5 +178,13 @@ async def churn_rag_analysis(request: Request):
     return templates.TemplateResponse(
         "pages/churn_rag_analysis.html",
         {"request": request, "title": "이탈자 RAG 분석"}
+    )
+    
+@router.get("/chatbot", response_class=HTMLResponse)
+async def chatbot_page(request: Request):
+    """AI 챗봇 페이지"""
+    return templates.TemplateResponse(
+        "pages/chatbot.html",
+        {"request": request, "title": "AI 챗봇"}
     )
 

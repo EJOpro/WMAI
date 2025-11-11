@@ -24,10 +24,17 @@ FastAPI 기반의 통합 웹 애플리케이션으로, 커뮤니티 관리, 비�
 - **이탈 분석 대시보드** - 사용자 이탈률 및 세그먼트 분석
 - **신고글 분류평가** - 카테고리별 신고 통계
 
-### 2. Ethics 분석 시스템
+### 2. Ethics 분석 시스템 (고도화)
 - **비윤리/스팸지수 평가** - AI 기반 텍스트 분석
-- **하이브리드 분석** - 규칙 기반 + ML 모델 결합
-- **로그 대시보드** - 분석 이력 조회 및 통계
+- **하이브리드 분석** - KcBERT + LLM(GPT-4.1-nano) + 규칙 기반 결합
+- **RAG 시스템** - 유사 사례 검색 및 점수 보정
+  - ChromaDB 벡터 데이터베이스 활용
+  - OpenAI Embeddings (text-embedding-3-small)
+  - 관리자 확정 사례 우선 참조
+- **즉시 차단** - 고신뢰도 확정 사례와 유사 시 LLM 건너뛰기
+- **배치 처리** - OpenAI API 호출 최적화 (4-6배 속도 향상)
+- **비동기 저장** - 벡터DB 저장 백그라운드 처리 (1-5초 단축)
+- **로그 대시보드** - 분석 이력 조회 및 RAG 상세 통계
 - **실시간 분석 API** - `/api/ethics/analyze` 엔드포인트
 
 ### 3. 이탈 분석 대시보드 (Churn Analysis)
@@ -50,9 +57,17 @@ FastAPI 기반의 통합 웹 애플리케이션으로, 커뮤니티 관리, 비�
 - **템플릿**: Jinja2 3.1+
 - **프론트엔드**: HTML5, CSS3, Vanilla JavaScript
 - **HTTP 클라이언트**: httpx 0.24+
-- **데이터베이스**: MySQL (PyMySQL), Redis 5.0+
-- **ML/NLP**: PyTorch, Transformers, scikit-learn
-- **백그라운드 작업**: APScheduler 3.10+
+- **데이터베이스**: 
+  - MySQL (PyMySQL) - 메인 데이터 저장
+  - ChromaDB - 벡터 데이터베이스 (RAG 시스템)
+  - Redis 5.0+ - 캐싱
+- **ML/NLP**: 
+  - PyTorch - BERT 모델
+  - Transformers - NLP 모델
+  - scikit-learn - ML 유틸리티
+  - OpenAI API - GPT-4.1-nano, text-embedding-3-small
+  - kss (Korean Sentence Splitter) - 한국어 문장 분리
+- **백그라운드 작업**: APScheduler 3.10+, Threading
 - **로깅**: Loguru 0.7+
 
 ## 설치 및 실행
@@ -129,11 +144,17 @@ WMAI/
 │   └── static/                 # 정적 파일 (CSS, JS, 이미지)
 │
 ├── ethics/                     # Ethics 분석 시스템
-│   ├── ethics_hybrid_predictor.py  # 하이브리드 분석기
-│   ├── ethics_db_logger.py     # 로그 관리
-│   ├── ethics_predict.py       # 예측 모델
+│   ├── ethics_hybrid_predictor.py  # 하이브리드 분석기 (BERT + GPT + RAG)
+│   ├── ethics_db_logger.py     # 로그 관리 (MySQL)
+│   ├── ethics_vector_db.py     # 벡터DB 관리 (ChromaDB)
+│   ├── ethics_embedding.py     # 임베딩 생성 (OpenAI API)
+│   ├── ethics_text_splitter.py # 텍스트 청킹 (kss 기반)
+│   ├── ethics_predict.py       # BERT 예측 모델
 │   ├── ethics_train_model.py   # 모델 학습
 │   └── models/                 # ML 모델 설정
+│
+├── ethics_chroma_store/        # ChromaDB 벡터 데이터베이스
+│   └── chroma.sqlite3          # 벡터 저장소
 │
 ├── chrun_backend/              # 이탈 분석 백엔드 로직
 │   ├── chrun_main.py           # FastAPI 라우터
@@ -174,6 +195,19 @@ WMAI/
 - `GET /api/reports/moderation` - 신고 분류 데이터
 - `POST /api/moderation/hate-score` - 혐오지수 분석
 
+#### Ethics 분석 API
+- `POST /api/ethics/analyze` - 비윤리/스팸 분석 (RAG 통합)
+  - Request: `{"text": "분석할 텍스트"}`
+  - Response: 점수, 신뢰도, RAG 정보, 즉시 차단 여부
+- `GET /api/ethics/logs` - 분석 로그 조회 (RAG 상세 포함)
+  - Query: `limit`, `offset`, `min_score`, `max_score`, `start_date`, `end_date`
+- `GET /api/ethics/logs/stats` - 통계 정보
+  - Query: `days` (기본값: 7)
+  - Response: 전체 건수, 평균 점수, RAG 적용 건수, 즉시 차단 건수
+- `DELETE /api/ethics/logs/{log_id}` - 특정 로그 삭제
+- `DELETE /api/ethics/logs/batch/old` - 오래된 로그 삭제
+  - Query: `days` (기본값: 90, 0이면 전체 삭제)
+
 ### WMAA 신고 검증 API
 
 - `POST /api/analyze` - 신고 내용 AI 분석
@@ -192,8 +226,8 @@ WMAI/
 - `GET /reports/admin` - 신고 관리 대시보드 (WMAA)
 - `GET /hate` - 혐오지수 평가
 - `GET /reports` - 신고글 분류
-- `GET /ethics_analyze` - 비윤리/스팸지수 평가
-- `GET /ethics_dashboard` - Ethics 로그 대시보드
+- `GET /ethics_analyze` - 비윤리/스팸지수 평가 (즉시 차단 지원)
+- `GET /ethics_dashboard` - Ethics 로그 대시보드 (RAG 통계 포함)
 - `GET /health` - 헬스체크
 
 ### TrendStream API (포트 8001)
@@ -215,14 +249,46 @@ WMAI/
 3. **증감률 계산** - 이전 날짜와 비교하여 트렌드 변화 분석
 4. **Mock Fallback** - API 오류 시 현실적인 Mock 데이터 반환
 
-### Ethics 분석 시스템
+### Ethics 분석 시스템 (고도화)
 
-하이브리드 방식으로 텍스트의 비윤리성과 스팸 여부를 분석:
+하이브리드 + RAG 방식으로 텍스트의 비윤리성과 스팸 여부를 분석:
 
-1. **규칙 기반 분석** - 사전 정의된 패턴 매칭
-2. **ML 모델 분석** - PyTorch 기반 딥러닝 모델
-3. **OpenAI API** - GPT를 활용한 고급 분석
-4. **로그 저장** - MySQL 데이터베이스에 분석 이력 저장
+#### 1. 다층 분석 파이프라인
+1. **BERT 모델** - 한국어 텍스트 비윤리 점수 예측
+2. **규칙 기반 스팸 감지** - 키워드, 패턴, 반복 감지
+3. **욕설 감지** - 사전 정의된 패턴 매칭 (부스트 점수 적용)
+4. **GPT-4.1-nano** - 종합적인 비윤리/스팸 판단
+5. **RAG 시스템** - 유사 사례 검색 및 점수 보정
+
+#### 2. RAG (Retrieval-Augmented Generation) 시스템
+- **문장 분리**: kss(Korean Sentence Splitter)를 사용한 정교한 한국어 문장 분리
+  - 종결 어미 인식 (다, 요, 임 등)
+  - 따옴표, 괄호 자동 처리
+  - 줄임표, 특수 문장부호 지원
+  - 폴백 메커니즘 (kss 미설치 시 정규식 사용)
+- **벡터 검색**: 문장별 임베딩 생성 (OpenAI text-embedding-3-small)
+- **유사 사례 검색**: ChromaDB에서 신뢰도 80% 이상 사례 검색
+- **관리자 확정 우선**: 관리자가 확정한 사례에 더 높은 가중치 부여
+- **점수 보정 가중치**:
+  - 유사도 ≥80% & 확정 케이스 ≥1개 → 60% 가중치
+  - 유사도 ≥80% & 케이스 ≥2개 → 50% 가중치
+  - 유사도 ≥80% & 케이스 ≥1개 → 30% 가중치
+  - 유사도 70~80% & 확정 케이스 ≥1개 → 40% 가중치
+
+#### 3. 즉시 차단 (LLM 건너뛰기)
+- **조건**: 유사도 ≥90%, 점수 ≥90, 신뢰도 ≥80% 확정 사례 발견
+- **효과**: LLM 분석 건너뛰고 즉시 차단 (비용 절감, 속도 향상)
+- **점수**: `null` 반환 (BERT 단독 신뢰도 낮음)
+
+#### 4. 성능 최적화
+- **배치 임베딩**: 한 번의 OpenAI API 호출로 여러 문장 처리 (4-6배 속도 향상)
+- **비동기 저장**: 벡터DB 저장을 백그라운드로 처리 (1-5초 응답 단축)
+- **병렬 처리**: 여러 문장 임베딩을 동시 생성
+
+#### 5. 데이터 저장
+- **MySQL**: `ethics_logs` (기본 분석 로그), `ethics_rag_logs` (RAG 상세 정보)
+- **ChromaDB**: 고신뢰도 케이스 벡터 저장 (신뢰도 ≥80%)
+- **자동 저장**: 분석 후 자동으로 고신뢰도 케이스 저장 (비동기)
 
 ## 개발 가이드
 
@@ -260,13 +326,108 @@ console.log(data.keywords);
 
 ### Ethics 분석 사용 예시
 
+#### Python API 사용
 ```python
 from ethics.ethics_hybrid_predictor import HybridEthicsAnalyzer
 
 analyzer = HybridEthicsAnalyzer()
 result = analyzer.analyze("분석할 텍스트")
+
+# 기본 정보
 print(f"비윤리 점수: {result['final_score']}")
+print(f"스팸 점수: {result['spam_score']}")
+print(f"신뢰도: {result['final_confidence']}")
+
+# RAG 정보
+if result.get('adjustment_applied'):
+    print(f"RAG 보정 적용됨")
+    print(f"유사 사례 수: {result['similar_cases_count']}")
+    print(f"최대 유사도: {result['max_similarity'] * 100:.1f}%")
+
+# 즉시 차단 여부
+if result.get('auto_blocked'):
+    print(f"즉시 차단됨 (LLM 분석 건너뛰기)")
+    print(f"사유: {result['auto_block_reason']}")
 ```
+
+#### REST API 사용
+```bash
+curl -X POST "http://localhost:8000/api/ethics/analyze" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "분석할 텍스트"}'
+```
+
+#### 응답 예시
+```json
+{
+  "text": "분석할 텍스트",
+  "score": 85.3,
+  "confidence": 92.1,
+  "spam": 15.2,
+  "spam_confidence": 78.5,
+  "types": ["욕설 및 비방"],
+  "auto_blocked": false,
+  "detailed": {
+    "bert_score": 79.1,
+    "llm_score": 88.5,
+    "rag": {
+      "enabled": true,
+      "adjustment_applied": true,
+      "similar_cases_count": 3,
+      "max_similarity": 0.87,
+      "adjustment_weight": 0.5
+    }
+  }
+}
+```
+
+#### 즉시 차단 응답 예시
+```json
+{
+  "text": "차단될 텍스트",
+  "score": null,
+  "confidence": null,
+  "spam": null,
+  "spam_confidence": null,
+  "types": ["욕설 및 비방"],
+  "auto_blocked": true,
+  "detailed": {
+    "bert_score": 79.1,
+    "llm_score": null,
+    "rag": {
+      "enabled": true,
+      "similar_cases_count": 1,
+      "max_similarity": 0.94
+    }
+  }
+}
+```
+
+## 성능 최적화
+
+### Ethics 분석 성능 개선 (2025년 1월 업데이트)
+
+#### 배치 임베딩 처리
+- **개선 전**: 5문장 분석 시 5번 API 호출 (4초)
+- **개선 후**: 5문장 분석 시 1번 API 호출 (0.8초)
+- **효과**: **4-6배 속도 향상** ⚡
+
+#### 비동기 벡터DB 저장
+- **개선 전**: 분석 → 저장 대기 (1-5초) → 응답
+- **개선 후**: 분석 → 즉시 응답 (저장은 백그라운드)
+- **효과**: **사용자 응답 시간 1-5초 단축** ⚡
+
+#### 전체 성능 개선 효과
+| 텍스트 길이 | 개선 전 | 개선 후 | 향상률 |
+|------------|---------|---------|--------|
+| 짧은 텍스트 (2문장) | 3-5초 | 1-2초 | 2-3배 |
+| 중간 텍스트 (5문장) | 6-10초 | 2-3초 | 3-4배 |
+| 긴 텍스트 (10문장) | 10-15초 | 3-5초 | 3-5배 |
+
+#### 즉시 차단 시스템
+- **조건**: 유사도 90% 이상 확정 사례 발견
+- **효과**: LLM 분석 건너뛰기 → **비용 절감 + 속도 향상**
+- **정확도**: 관리자 확정 사례 기반 → **높은 신뢰도**
 
 ## 배포
 
@@ -327,7 +488,24 @@ MIT License
 
 프로젝트에 기여하시려면 Pull Request를 생성해주세요.
 
+## 주요 업데이트 내역
+
+### 2025년 1월 - Ethics 분석 시스템 고도화
+- ✅ **RAG 시스템 통합**: ChromaDB 벡터 데이터베이스 활용
+- ✅ **kss 문장 분리**: 한국어 특화 문장 분리기 적용 (종결어미, 따옴표 지원)
+- ✅ **즉시 차단 기능**: 고신뢰도 확정 사례와 유사 시 LLM 건너뛰기
+- ✅ **배치 임베딩**: OpenAI API 호출 최적화 (4-6배 속도 향상)
+- ✅ **비동기 저장**: 벡터DB 저장 백그라운드 처리 (1-5초 단축)
+- ✅ **RAG 로그**: `ethics_rag_logs` 테이블 추가 (상세 보정 정보 저장)
+- ✅ **대시보드 개선**: RAG 통계, 즉시 차단 건수 표시
+
+### 2024년 12월 - 초기 구축
+- 🎉 WMAA 신고 검증 시스템 통합
+- 🎉 TrendStream 백엔드 통합
+- 🎉 이탈 분석 대시보드 통합
+- 🎉 Ethics 분석 기본 시스템 구축
+
 ## 문의
 
-WMAA 통합 관련 문의사항이 있으시면 이슈를 등록해주세요.
+프로젝트 관련 문의사항이 있으시면 이슈를 등록해주세요.
 

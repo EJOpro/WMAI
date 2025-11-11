@@ -72,7 +72,7 @@
     </div>
     <main class="container">
 <div class="hero-section">
-    <img src="/static/img/sub_home.png" alt="Community Admin Logo" style="width: 400px; max-width: 90%; height: auto; margin: 0 auto 30px; display: block; filter: drop-shadow(0 10px 20px rgba(0,0,0,0.1));">
+    <img src="/static/img/sub_home.png" alt="Community Admin Logo" style="width: 400px; max-width: 90%; height: auto; margin: 0 auto 10px; display: block; filter: drop-shadow(0 10px 20px rgba(0,0,0,0.1));">
     <p>커뮤니티 관리 대시보드</p>
 </div>
 
@@ -205,57 +205,21 @@
         }
     }, 2000);
 
-    // 검색 기능
+    // 검색 기능 - AI 챗봇으로 이동
     document.getElementById('searchBtn').addEventListener('click', performSearch);
     document.getElementById('searchInput').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') performSearch();
     });
 
-    async function performSearch() {
+    function performSearch() {
         const query = document.getElementById('searchInput').value.trim();
         if (!query) {
-            showAlert('검색어를 입력하세요', 'warning');
+            alert('질문을 입력하세요');
             return;
         }
 
-        const resultsDiv = document.getElementById('searchResults');
-        resultsDiv.innerHTML = '<div class="loading">검색 중...</div>';
-
-        try {
-            const response = await apiRequest(`/api/search?q=${encodeURIComponent(query)}`);
-            displaySearchResults(response);
-        } catch (error) {
-            resultsDiv.innerHTML = `<div class="error">검색 실패: ${error.message}</div>`;
-        }
-    }
-
-    function displaySearchResults(data) {
-        const resultsDiv = document.getElementById('searchResults');
-        
-        if (!data || !data.results || data.results.length === 0) {
-            resultsDiv.innerHTML = '<div class="no-results">검색 결과가 없습니다.</div>';
-            return;
-        }
-
-        const html = `
-            <div class="results-header">
-                <h3>검색 결과 (${data.results.length}건)</h3>
-            </div>
-            <div class="results-list">
-                ${data.results.map(item => `
-                    <div class="result-item">
-                        <h4>${item.title || '제목 없음'}</h4>
-                        <p>${item.content || item.description || ''}</p>
-                        <div class="result-meta">
-                            <span>작성일: ${item.date || 'N/A'}</span>
-                            <span>작성자: ${item.author || 'Anonymous'}</span>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-        
-        resultsDiv.innerHTML = html;
+        // AI 챗봇 페이지로 이동 (질문을 URL 파라미터로 전달)
+        window.location.href = `/chatbot?q=${encodeURIComponent(query)}`;
     }
 </script>
 </body>
