@@ -2292,8 +2292,8 @@ table tbody tr:hover {
 }
 
 .message-content {
-    background: white;
-    border: 1px solid #E5E7EB;
+    /* background: white; */
+    /* border: 1px solid #E5E7EB; */
     border-radius: 8px;
     padding: 20px;
     min-height: 200px;
@@ -2310,7 +2310,7 @@ table tbody tr:hover {
     border: 1px solid #D1D5DB;
     border-top: none;
     border-radius: 0 0 8px 8px;
-    max-height: 200px;
+    /* max-height: 200px; */
     overflow-y: auto;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
