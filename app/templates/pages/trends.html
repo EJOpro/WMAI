@@ -23,20 +23,21 @@
     
     .wordcloud-container {
         min-height: 300px;
-        max-height: 300px;
-        background: var(--bg-color);
-        border-radius: 0.5rem;
-        padding: 2rem;
+        max-height: 700px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 1rem;
+        padding: 3rem;
         display: flex;
         align-items: center;
         justify-content: center;
         position: relative;
         overflow: hidden;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     }
     
     #wordcloudCanvas {
         width: 100%;
-        max-width: 1000px;
+        max-width: 1400px;
         height: 300px;
         margin: 0 auto;
     }
@@ -118,9 +119,9 @@
         padding: 0.5rem 1rem;
         background: white;
         border: 1px solid var(--border-color);
-        border-radius: 0.375rem;
+        border-radius: 0.8rem;
         cursor: pointer;
-        font-size: 0.875rem;
+        font-size: 1rem;
         transition: all 0.2s;
         color: var(--text-color);
     }
@@ -492,73 +493,27 @@
     // API 요청 헬퍼 함수
     async function apiRequest(endpoint) {
         try {
-            // 실제 API 호출 시도
-            const now = new Date();
-            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            // ✅ 8000 포트의 /api/trends 호출 (풍성한 Mock 데이터!)
+            console.log('🔄 Calling /api/trends with 255 keywords...');
+            const response = await fetch(`http://localhost:8000/api/trends?limit=255`);
             
-            const wordcloudResponse = await fetch(`http://localhost:8001/api/v1/community/wordcloud?start=${weekAgo.toISOString()}&end=${now.toISOString()}&top_k=50`);
-            
-            if (wordcloudResponse.ok) {
-                const wordcloudData = await wordcloudResponse.json();
-                
-                // 한글 인코딩 문제로 임시 테스트 데이터 사용
-                const testKeywords = [
-                    { word: '건강', count: 15, weight: 1.0 },
-                    { word: '요리', count: 12, weight: 0.8 },
-                    { word: '육아', count: 10, weight: 0.67 },
-                    { word: '여행', count: 8, weight: 0.53 },
-                    { word: '운동', count: 7, weight: 0.47 },
-                    { word: '독서', count: 6, weight: 0.4 },
-                    { word: '음식', count: 5, weight: 0.33 },
-                    { word: '취미', count: 4, weight: 0.27 },
-                    { word: '일상', count: 3, weight: 0.2 },
-                    { word: '공부', count: 2, weight: 0.13 }
-                ];
-
-                // 트렌드 변화 계산
-                const trends = testKeywords.map((word, index) => ({
-                    keyword: word.word,
-                    mentions: word.count,
-                    change: Math.random() * 20 - 10,
-                    category: 'general'
-                }));
-
-                const risingTrends = trends.filter(t => t.change > 0).length;
-                const newTrends = Math.floor(testKeywords.length * 0.2); // 20%를 신규로 가정
-
-                // 타임라인 데이터 생성 (최근 7일)
-                const timelineData = [];
-                const now = new Date();
-                for (let i = 6; i >= 0; i--) {
-                    const date = new Date(now);
-                    date.setDate(date.getDate() - i);
-                    timelineData.push({
-                        date: date.toISOString().split('T')[0],
-                        count: Math.floor(Math.random() * 30) + 20 // 20~50 사이 랜덤 값
-                    });
-                }
-
-                return {
-                    source: 'test_data',
-                    summary: {
-                        total_posts: wordcloudData.total_posts || 23,
-                        total_comments: wordcloudData.total_comments || 47,
-                        unique_keywords: testKeywords.length,
-                        total_trends: testKeywords.length,
-                        new_trends: newTrends,
-                        rising_trends: risingTrends
-                    },
-                    keywords: testKeywords,
-                    trends: trends,
-                    wordcloud: testKeywords,
-                    timeline: timelineData
-                };
+            if (response.ok) {
+                const data = await response.json();
+                console.log('✅ 트렌드 데이터 로드 성공:', data);
+                console.log('📊 키워드 개수:', data.keywords?.length);
+                console.log('📈 트렌드 개수:', data.trends?.length);
+                console.log('🔢 게시글 수:', data.summary?.total_posts);
+                console.log('💬 댓글 수:', data.summary?.total_comments);
+                return data;
+            } else {
+                console.warn('⚠️ API 응답 실패:', response.status);
             }
         } catch (error) {
-            console.error('API 요청 오류:', error);
+            console.error('❌ API 호출 실패:', error);
         }
         
         // 폴백 데이터
+        console.warn('⚠️ Using fallback data');
         return {
             source: 'fallback',
             summary: {
@@ -571,7 +526,6 @@
             },
             keywords: [],
             trends: [],
-            wordcloud: [],
             timeline: []
         };
     }
@@ -992,25 +946,52 @@
             }
             
             WordCloud(container, {
-                list: wordcloudData.slice(0, 50),  // 상위 50개만 사용
-                // 글자 크기 조정 - 가독성 확보
-                gridSize: 8,  // 간격 좁게 (더 많이 표시)
-                weightFactor: 3,  // 글자 크기 적당하게 (보이도록 조정)
-                fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                fontWeight: '600',
-                color: function(word, weight, fontSize) {
-                    // 큰 글씨(빈도수 높음): 진한 파란색, 작은 글씨: 밝은 파란색
-                    return fontSize > 20 ? '#2563eb' : '#3b82f6';
+                list: wordcloudData.slice(0, 100),  // 100개 (적절한 양)
+                
+                // 겹침 방지 & 크기 차이 극대화 설정
+                gridSize: 25,  // 간격 더 넓게 (겹침 완전 방지)
+                weightFactor: function(size) {
+                    // 빈도에 따른 크기 차이 극대화
+                    // size 범위: 10~300
+                    // 지수 1.3으로 차이 크게, 곱하기 0.25로 적절한 크기
+                    return Math.pow(size, 0.75) * 0.25;
                 },
+                
+                fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontWeight: function() {
+                    // 다양한 굵기
+                    return [100, 200, 300, 400, 500, 600, 700][Math.floor(Math.random() * 7)];
+                },
+                
+                color: function(word, weight, fontSize) {
+                    // 파스텔 컬러 (보라 배경에 잘 어울림)
+                    const colors = [
+                        '#FFFFFF', '#FFE5E5', '#E5F5FF', '#FFF5E5',
+                        '#F0FFF0', '#FFF0F5', '#F5F0FF', '#FFFACD',
+                        '#E0FFFF', '#FFE4E1', '#F0E68C', '#E6E6FA'
+                    ];
+                    return colors[Math.floor(Math.random() * colors.length)];
+                },
+                
                 backgroundColor: 'transparent',
-                // 모양 설정 (circle이 가장 많이 표시됨)
-                shape: 'circle',  // circle이 가장 효율적
-                rotateRatio: 0.5,
-                rotationSteps: 2,
-                drawOutOfBound: false,
-                shrinkToFit: true,
+                
+                // 원형 모양 설정
+                shape: function(theta) {
+                    // 완벽한 원형 생성
+                    return 1;  // 반지름 1 = 원형
+                },
+                ellipticity: 1,  // 1 = 완전한 원형 (0.5 = 타원)
+                
+                // 겹침 방지 핵심 설정
+                rotateRatio: 1,  // 회전 줄임
+                rotationSteps: 5,
+                
+                minSize: 10,  // 최소 크기 (작은 단어도 잘 보임)
+                maxSize: 75,  // 최대 크기 (큰 단어는 확실히 크게)
+                drawOutOfBound: false,  // 경계 밖 그리지 않음
+                shrinkToFit: true,  // 자동 축소
                 clearCanvas: true,
-                wait: 0
+                wait: 0.0  // 렌더링 여유 시간 증가
             });
             
             console.log('워드클라우드 렌더링 완료:', wordcloudData.length, '개 단어', '(모양:', shape + ')');
@@ -1041,26 +1022,39 @@
             }
             
             WordCloud(container, {
-                list: currentWordcloudData.slice(0, 50),  // 상위 50개만
-                gridSize: 16,  // 간격 더 넓게
-                weightFactor: 0.05,  // 글자 크기 극소 (사용자 요청: 0.35 → 0.05)
+                list: currentWordcloudData.slice(0, 100),  // 100개
+                gridSize: 12,  // 간격 넓게
+                weightFactor: function(size) {
+                    return Math.pow(size, 0.75) * 0.25;
+                },
                 fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                fontWeight: '400',
+                fontWeight: function() {
+                    return [100, 200, 300, 400, 500, 600, 700][Math.floor(Math.random() * 7)];
+                },
                 color: function(word, weight, fontSize) {
-                    // 큰 글씨(빈도수 높음): 진한 파란색, 작은 글씨: 밝은 파란색
-                    return fontSize > 20 ? '#2563eb' : '#3b82f6';
+                    const colors = [
+                        '#FFFFFF', '#FFE5E5', '#E5F5FF', '#FFF5E5',
+                        '#F0FFF0', '#FFF0F5', '#F5F0FF', '#FFFACD',
+                        '#E0FFFF', '#FFE4E1', '#F0E68C', '#E6E6FA'
+                    ];
+                    return colors[Math.floor(Math.random() * colors.length)];
                 },
                 backgroundColor: 'transparent',
-                shape: shape,
-                ellipticity: 0.7,  // 하트 세로 비율
+                
+                // 원형 모양 설정
+                shape: function(theta) {
+                    return 1;  // 완벽한 원형
+                },
+                ellipticity: 1,  // 완전한 원형
+                
                 rotateRatio: 0.3,
                 rotationSteps: 2,
-                minSize: 4,
-                maxSize: 18,
+                minSize: 3,
+                maxSize: 75,
                 drawOutOfBound: false,
                 shrinkToFit: true,
                 clearCanvas: true,
-                wait: 0
+                wait: 0.0
             });
             
             currentShape = shape;

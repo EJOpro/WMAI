@@ -138,6 +138,10 @@ class TextSplitter:
             
             # ⭐ 사용자 컨텍스트 추가 (선택적)
             if user_context:
+                # 제목 추가 (가장 중요한 문맥 정보)
+                if "title" in user_context:
+                    sentence_dict["title"] = user_context["title"]
+                
                 if "activity_trend" in user_context:
                     sentence_dict["user_activity_trend"] = user_context["activity_trend"]
                 if "prev_posts_count" in user_context:
@@ -150,6 +154,59 @@ class TextSplitter:
             result.append(sentence_dict)
             
         return result
+    
+    def _fix_incomplete_splits(self, sentences: List[str]) -> List[str]:
+        """
+        잘못 분할된 문장들을 복구하는 후처리
+        
+        KSS가 "~봐자", "~해야지", "~가야지" 등을 잘못 분할하는 경우를 수정
+        예: ["여기 있어봐", "자 소용없다"] → ["여기 있어봐자 소용없다"]
+        
+        Args:
+            sentences (List[str]): 분할된 문장 리스트
+            
+        Returns:
+            List[str]: 복구된 문장 리스트
+        """
+        if len(sentences) <= 1:
+            return sentences
+        
+        corrected = []
+        i = 0
+        
+        while i < len(sentences):
+            current = sentences[i].strip()
+            
+            # 마지막 문장이 아니면 다음 문장과의 병합 체크
+            if i < len(sentences) - 1:
+                next_sent = sentences[i + 1].strip()
+                
+                # 패턴 1: 다음 문장이 "자"로 시작하는 경우
+                # "~봐자", "~해야지", "~가야지" 등의 패턴 복구
+                if next_sent.startswith('자 ') or next_sent == '자':
+                    merged = current + next_sent
+                    corrected.append(merged)
+                    logger.debug(f"문장 병합: '{current}' + '{next_sent}' → '{merged}'")
+                    i += 2
+                    continue
+                
+                # 패턴 2: 현재 문장이 불완전한 조사로 끝나는 경우
+                # "~면", "~는", "~은", "~고" 등으로 끝나는 경우
+                incomplete_endings = ['면', '는', '은', '이', '가', '를', '에', '고', '서', '며']
+                if any(current.endswith(ending) for ending in incomplete_endings):
+                    # 다음 문장이 너무 짧으면(10자 이하) 병합
+                    if len(next_sent) <= 10:
+                        merged = current + ' ' + next_sent
+                        corrected.append(merged)
+                        logger.debug(f"불완전 문장 병합: '{current}' + '{next_sent}' → '{merged}'")
+                        i += 2
+                        continue
+            
+            # 병합하지 않는 경우 그대로 추가
+            corrected.append(current)
+            i += 1
+        
+        return corrected
     
     def _split_sentences(self, text: str) -> List[str]:
         """
@@ -172,8 +229,12 @@ class TextSplitter:
                 # 빈 문장 제거
                 sentences = [s.strip() for s in sentences if s.strip()]
                 
+                # ⭐ 후처리: 잘못 분할된 "~자" 패턴 복구
+                # 예: "여기 있어봐" + "자 소용없다" → "여기 있어봐자 소용없다"
+                sentences = self._fix_incomplete_splits(sentences)
+                
                 if sentences:  # 성공
-                    logger.debug(f"KSS로 {len(sentences)}개 문장 분할 완료")
+                    logger.debug(f"KSS로 {len(sentences)}개 문장 분할 완료 (후처리 적용)")
                     return sentences
                     
             except Exception as e:
@@ -191,7 +252,7 @@ class TextSplitter:
         processed_sentences = []
         for sentence in sentences:
             # 문장이 문장부호로 끝나지 않는 경우 마침표 추가
-            if sentence and not sentence[-1] in '.!?':
+            if sentence and sentence[-1] not in '.!?':
                 # 10글자 이상인 경우만 마침표 추가
                 if len(sentence) > 10:
                     sentence += '.'

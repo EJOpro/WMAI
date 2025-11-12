@@ -66,6 +66,13 @@ def init_db() -> None:
     _ensure_tables(engine)
 
     try:
+        # 항상 불필요한 샘플 사용자 레코드를 정리
+        try:
+            _ = delete_users(["user_001", "user_042", "user_156", "user_299"])
+        except Exception:
+            # 삭제 실패해도 초기화는 계속 진행
+            pass
+
         with get_session() as session:
             count_stmt = select(func.count()).select_from(high_risk_chunks)
             total = session.execute(count_stmt).scalar_one()
@@ -145,9 +152,13 @@ def init_db() -> None:
                         "confirmed": 1,
                     },
                 ]
-                session.execute(insert(high_risk_chunks), sample_data)
+                # 요청에 따라 특정 샘플 사용자는 삽입하지 않도록 필터링
+                excluded_users = {"user_001", "user_042", "user_156", "user_299"}
+                filtered = [row for row in sample_data if row["user_id"] not in excluded_users]
+                if filtered:
+                    session.execute(insert(high_risk_chunks), filtered)
                 session.commit()
-                print(f"[INFO] 샘플 고위험 문장 {len(sample_data)}건 삽입 완료")
+                print(f"[INFO] 샘플 고위험 문장 {len(filtered)}건 삽입 완료 (요청 제외 사용자 제외 반영)")
     except SQLAlchemyError as exc:
         print(f"[ERROR] DB 초기화 중 오류 발생: {exc}")
         raise
@@ -176,7 +187,7 @@ def get_recent_high_risk(limit: int = 5, only_unconfirmed: bool = True) -> List[
         
         rows = session.execute(stmt).mappings().all()
         results = [_row_to_dict(r) for r in rows]
-        print(f"[INFO] 고위험 문장 {len(results)}건 조회 (only_unconfirmed={only_unconfirmed})")
+        # print(f"[INFO] 고위험 문장 {len(results)}건 조회 (only_unconfirmed={only_unconfirmed})")  # 30초마다 반복되므로 주석 처리
         return results
 
 
@@ -185,21 +196,27 @@ def get_chunk_by_id(chunk_id: str) -> Dict[str, Any]:
         stmt = select(high_risk_chunks).where(high_risk_chunks.c.chunk_id == chunk_id)
         row = session.execute(stmt).mappings().first()
         if row:
-            print(f"[INFO] chunk 조회 완료: {chunk_id}")
+            # print(f"[INFO] chunk 조회 완료: {chunk_id}")  # 빈번하므로 주석 처리
             return _row_to_dict(row)
-        print(f"[WARN] chunk를 찾을 수 없음: {chunk_id}")
+        # print(f"[WARN] chunk를 찾을 수 없음: {chunk_id}")  # 빈번하므로 주석 처리
         return {}
 
 
-def save_high_risk_chunk(chunk_dict: Dict[str, Any]) -> None:
+def save_high_risk_chunk(chunk_dict: Dict[str, Any]) -> str:
     chunk_id = chunk_dict.get("chunk_id", str(uuid.uuid4()))
+    
+    # created_at이 datetime 객체인 경우 isoformat()으로 변환
+    created_at_value = chunk_dict.get("created_at", datetime.now().isoformat())
+    if isinstance(created_at_value, datetime):
+        created_at_value = created_at_value.isoformat()
+    
     payload = {
         "chunk_id": chunk_id,
         "user_id": chunk_dict.get("user_id", ""),
         "post_id": chunk_dict.get("post_id", ""),
         "sentence": chunk_dict.get("sentence", ""),
         "risk_score": float(chunk_dict.get("risk_score", 0.0)),
-        "created_at": chunk_dict.get("created_at", datetime.now().isoformat()),
+        "created_at": created_at_value,
         "confirmed": 1 if chunk_dict.get("confirmed", 0) else 0,
     }
     with get_session() as session:
@@ -213,10 +230,12 @@ def save_high_risk_chunk(chunk_dict: Dict[str, Any]) -> None:
                 .where(high_risk_chunks.c.chunk_id == chunk_id)
                 .values(**payload)
             )
+            print(f"[INFO] 고위험 문장 업데이트 완료: {chunk_id}")
         else:
             session.execute(insert(high_risk_chunks).values(**payload))
+            print(f"[INFO] 고위험 문장 신규 저장 완료: {chunk_id}")
         session.commit()
-    print(f"[INFO] 고위험 문장 저장 완료: {chunk_id}")
+    return chunk_id
 
 
 def update_feedback(
@@ -226,48 +245,51 @@ def update_feedback(
     segment: Optional[str] = None,
     reason: Optional[str] = None,
 ) -> None:
+    # 피드백 처리 전에 chunk 데이터를 먼저 조회 (벡터DB 저장용)
+    chunk_data = None
+    if confirmed:
+        chunk_data = get_chunk_by_id(chunk_id)
+    
+    # 피드백을 제출한 chunk는 high_risk_chunks 테이블에서 삭제
+    # (관리자가 이미 확인했으므로 더 이상 대시보드에 표시할 필요 없음)
     with get_session() as session:
-        stmt = (
-            update(high_risk_chunks)
-            .where(high_risk_chunks.c.chunk_id == chunk_id)
-            .values(confirmed=1 if confirmed else 0)
-        )
+        from sqlalchemy import delete
+        stmt = delete(high_risk_chunks).where(high_risk_chunks.c.chunk_id == chunk_id)
         result = session.execute(stmt)
         session.commit()
         if result.rowcount == 0:
             print(f"[WARN] chunk_id를 찾을 수 없음: {chunk_id}")
             return
-        print(f"[INFO] 피드백 업데이트 완료: {chunk_id} confirmed={confirmed}")
+        print(f"[INFO] 피드백 처리 완료 (레코드 삭제): {chunk_id} confirmed={confirmed}")
 
-    if confirmed:
+    # confirmed=true인 경우에만 벡터DB에 저장 (향후 참고용)
+    if confirmed and chunk_data:
         try:
-            chunk_data = get_chunk_by_id(chunk_id)
-            if chunk_data:
-                from .vector_store import get_vector_store
-                from .embedding_service import get_embedding
+            from .vector_store import get_vector_store
+            from .embedding_service import get_embedding
 
-                vector_store = get_vector_store()
-                sentence = chunk_data.get("sentence", "")
-                if sentence:
-                    embedding = get_embedding(sentence)
-                    metadata_dict = {
-                        "user_id": chunk_data.get("user_id", ""),
-                        "post_id": chunk_data.get("post_id", ""),
-                        "sentence": sentence,
-                        "risk_score": chunk_data.get("risk_score", 0.0),
-                        "created_at": chunk_data.get(
-                            "created_at", datetime.now().isoformat()
-                        ),
-                    }
-                    vector_store.upsert_high_risk_chunk(
-                        embedding=embedding,
-                        metadata_dict=metadata_dict,
-                        confirmed=True,
-                        who_labeled=who_labeled or "admin",
-                        segment=segment,
-                        reason=reason,
-                    )
-                    print(f"[INFO] 벡터DB에 확정 청크 upsert 완료: {chunk_id}")
+            vector_store = get_vector_store()
+            sentence = chunk_data.get("sentence", "")
+            if sentence:
+                embedding = get_embedding(sentence)
+                metadata_dict = {
+                    "user_id": chunk_data.get("user_id", ""),
+                    "post_id": chunk_data.get("post_id", ""),
+                    "sentence": sentence,
+                    "risk_score": chunk_data.get("risk_score", 0.0),
+                    "created_at": chunk_data.get(
+                        "created_at", datetime.now().isoformat()
+                    ),
+                }
+                vector_store.upsert_high_risk_chunk(
+                    embedding=embedding,
+                    metadata_dict=metadata_dict,
+                    confirmed=True,
+                    who_labeled=who_labeled or "admin",
+                    segment=segment,
+                    reason=reason,
+                )
+                # print(f"[INFO] 벡터DB에 확정 청크 upsert 완료: {chunk_id}")  # 빈번하므로 주석 처리
         except Exception as exc:  # noqa: BLE001
             print(f"[ERROR] 벡터DB upsert 실패: {exc}")
 
@@ -313,6 +335,53 @@ def _hash_identifier(value: Optional[str]) -> str:
     if not value:
         return "anonymous"
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
+
+
+# 유지보수 유틸: 특정 사용자들의 샘플/테스트 데이터 삭제
+def delete_users(user_ids: List[str]) -> int:
+    """
+    high_risk_chunks 테이블에서 특정 user_id 목록의 데이터를 삭제합니다.
+
+    Returns:
+        int: 삭제된 행 수
+    """
+    if not user_ids:
+        return 0
+    with get_session() as session:
+        try:
+            from sqlalchemy import delete
+            stmt = delete(high_risk_chunks).where(high_risk_chunks.c.user_id.in_(user_ids))
+            result = session.execute(stmt)
+            session.commit()
+            deleted = result.rowcount or 0
+            print(f"[INFO] 사용자 데이터 삭제 완료: users={user_ids}, deleted={deleted}")
+            return deleted
+        except SQLAlchemyError as exc:
+            session.rollback()
+            print(f"[ERROR] 사용자 데이터 삭제 실패: {exc}")
+            raise
+
+
+def delete_all_risk_data() -> int:
+    """
+    모든 고위험 데이터를 삭제합니다.
+    
+    Returns:
+        int: 삭제된 행 수
+    """
+    with get_session() as session:
+        try:
+            from sqlalchemy import delete
+            stmt = delete(high_risk_chunks)
+            result = session.execute(stmt)
+            session.commit()
+            deleted = result.rowcount or 0
+            print(f"[INFO] 모든 고위험 데이터 삭제 완료: deleted={deleted}")
+            return deleted
+        except SQLAlchemyError as exc:
+            session.rollback()
+            print(f"[ERROR] 모든 고위험 데이터 삭제 실패: {exc}")
+            raise
 
 
 if __name__ == "__main__":

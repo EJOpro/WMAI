@@ -48,6 +48,8 @@ def start_servers():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             bufsize=1
         )
         processes.append(main_server)
@@ -63,6 +65,8 @@ def start_servers():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             bufsize=1
         )
         processes.append(trend_server)

@@ -372,66 +372,86 @@ def analyze_and_update_comment(comment_id: int, text: str, ip_address: str = Non
         print(f"[ERROR] 댓글 {comment_id} - 백그라운드 분석 실패: {e}")
 
 
-def analyze_churn_risk_and_store(post_id: int, user_id: int, text: str, created_at: str):
+def analyze_churn_risk_and_store(post_id: int, user_id: int, text: str, created_at: str, title: str = ""):
     """
     백그라운드에서 이탈 위험도 분석 및 저장
+    
+    텍스트를 문장 단위로 분할하고, 각 문장별로 위험도를 분석하여
+    임계값 이상인 고위험 문장만 선별적으로 저장합니다.
     
     Args:
         post_id: 게시글 ID
         user_id: 사용자 ID
         text: 게시글 내용
         created_at: 생성 시간
+        title: 게시글 제목 (문맥 분석용)
     """
     try:
-        from chrun_backend.rag_pipeline.rag_checker import check_new_post
-        from chrun_backend.rag_pipeline.high_risk_store import save_high_risk_chunk
-        import uuid
+        from chrun_backend.rag_pipeline.text_splitter import split_text_to_sentences
+        from chrun_backend.rag_pipeline.risk_scorer import RiskScorer
+        from datetime import datetime
         
-        print(f"[INFO] 게시글 {post_id} - 이탈 위험도 분석 시작")
+        print(f"[INFO] 게시글 {post_id} - 이탈 위험도 분석 시작", flush=True)
+        print(f"[DEBUG] 게시글 {post_id} - 제목: {title}", flush=True)
+        print(f"[DEBUG] 게시글 {post_id} - 텍스트 길이: {len(text)}자", flush=True)
+        print(f"[DEBUG] 게시글 {post_id} - 텍스트 내용: {text[:100]}...", flush=True)
         
-        # RAG 분석 수행
-        result = check_new_post(
+        # 1. 텍스트를 문장 단위로 분할
+        created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00')) if isinstance(created_at, str) else created_at
+        
+        # 제목을 user_context로 전달 (문맥 분석용)
+        user_context = {"title": title} if title else None
+        
+        sentences = split_text_to_sentences(
             text=text,
-            user_id=str(user_id),
+            user_id=user_id,  # 숫자 그대로 전달 (users.id와 매칭)
             post_id=f"board_{post_id}",
-            created_at=created_at
+            created_at=created_at_dt,
+            user_context=user_context
         )
         
-        decision = result.get("decision", {})
-        evidence = result.get("evidence", [])
-        risk_score = decision.get("risk_score", 0.0)
-        priority = decision.get("priority", "LOW")
+        print(f"[DEBUG] 게시글 {post_id} - split_text_to_sentences 반환 결과: {len(sentences) if sentences else 0}개 문장", flush=True)
         
-        print(f"[INFO] 게시글 {post_id} - 위험도: {priority} ({risk_score:.2f})")
+        if not sentences:
+            print(f"[WARN] 게시글 {post_id} - 분할된 문장이 없음 (필터링됨 또는 분할 실패)", flush=True)
+            return
         
-        # 위험도가 MEDIUM 이상이거나, evidence가 있는 경우 저장
-        if priority in ["MEDIUM", "HIGH", "CRITICAL"] or len(evidence) > 0:
-            # 전체 텍스트를 하나의 청크로 저장
-            save_high_risk_chunk({
-                "chunk_id": str(uuid.uuid4()),
-                "user_id": str(user_id),
-                "post_id": f"board_{post_id}",
-                "sentence": text[:500],  # 처음 500자
-                "risk_score": risk_score,
-                "created_at": created_at,
-                "confirmed": False  # 관리자 확인 전
-            })
-            
-            # Evidence의 각 문장도 저장 (유사도가 높은 것들)
-            for ev in evidence[:3]:  # 상위 3개만
-                save_high_risk_chunk({
-                    "chunk_id": str(uuid.uuid4()),
-                    "user_id": str(user_id),
-                    "post_id": f"board_{post_id}",
-                    "sentence": ev.get("sentence", ""),
-                    "risk_score": ev.get("risk_score", risk_score),
-                    "created_at": created_at,
-                    "confirmed": False
-                })
-            
-            print(f"[INFO] ⚠️ 게시글 {post_id} - 위험도 {priority} 감지! 관리자 검토 대기 중")
+        print(f"[INFO] 게시글 {post_id} - {len(sentences)}개 문장으로 분할 완료")
+        
+        # 분할된 문장 출력
+        for i, sent_data in enumerate(sentences, 1):
+            sent_text = sent_data.get('sentence', '')
+            print(f"[INFO]   문장 {i}: \"{sent_text[:80]}...\"")
+        
+        # 2. RiskScorer로 각 문장의 위험도 분석
+        # _save_to_high_risk_store가 내부적으로 호출되어 고위험 문장만 자동 저장됨
+        scorer = RiskScorer()
+        result = scorer.score_sentences(sentences, store_high_risk=False)
+        
+        # 분석 결과 추출
+        all_scored = result.get('all_scored', [])
+        high_risk_candidates = result.get('high_risk_candidates', [])
+        
+        # 전체 위험도 계산 (최고 위험도 문장 기준)
+        max_risk_score = max([s.get('risk_score', 0.0) for s in all_scored], default=0.0)
+        
+        # 모든 문장의 위험도 출력
+        print(f"[INFO] 게시글 {post_id} - 문장별 위험도 분석 결과:")
+        for i, scored in enumerate(all_scored, 1):
+            sentence = scored.get('sentence', '')
+            risk_score = scored.get('risk_score', 0.0)
+            is_high = scored.get('is_high_risk', False)
+            status = "🔴 고위험" if is_high else "✅ 정상"
+            print(f"[INFO]   {i}. [{status}] 위험도 {risk_score:.3f} - \"{sentence[:60]}...\"")
+        
+        if high_risk_candidates:
+            print(f"[INFO] ⚠️ 게시글 {post_id} - {len(high_risk_candidates)}개의 고위험 문장 감지! (임계값: 0.75)")
+            for i, candidate in enumerate(high_risk_candidates, 1):
+                sentence = candidate.get('sentence', '')
+                risk_score = candidate.get('risk_score', 0.0)
+                print(f"[INFO]   {i}. \"{sentence[:60]}...\" (위험도: {risk_score:.3f})")
         else:
-            print(f"[INFO] ✅ 게시글 {post_id} - 위험도 {priority}, 정상 범위")
+            print(f"[INFO] ✅ 게시글 {post_id} - 고위험 문장 없음 (최고 위험도: {max_risk_score:.3f}, 임계값: 0.75)")
         
     except Exception as e:
         print(f"[ERROR] 게시글 {post_id} - 이탈 위험도 분석 실패: {e}")
@@ -922,15 +942,24 @@ async def create_post(request: Request, data: PostCreate):
     """, (user['user_id'], data.title, data.content, data.category, content_status))
     
     # ⭐ 새로 추가: RAG 기반 이탈 위험도 분석 (백그라운드)
-    if content_status != 'blocked':  # 차단되지 않은 경우만 분석
-        background_executor.submit(
-            analyze_churn_risk_and_store,
-            post_id,
-            user['user_id'],
-            data.content,
-            datetime.now().isoformat()
-        )
-        print(f"[INFO] 게시글 {post_id} - 백그라운드 이탈 위험도 분석 시작됨")
+    try:
+        print(f"[DEBUG] 게시글 {post_id} - content_status: {content_status}, 백그라운드 작업 제출 시도...", flush=True)
+        if content_status != 'blocked':  # 차단되지 않은 경우만 분석
+            background_executor.submit(
+                analyze_churn_risk_and_store,
+                post_id,
+                user['user_id'],
+                data.content,  # 본문만 (제목은 별도 전달)
+                datetime.now().isoformat(),
+                data.title  # 제목을 문맥으로 전달
+            )
+            print(f"[INFO] 게시글 {post_id} - 백그라운드 이탈 위험도 분석 시작됨 (제목 포함)", flush=True)
+        else:
+            print(f"[INFO] 게시글 {post_id} - 차단됨, 이탈 위험도 분석 건너뜀", flush=True)
+    except Exception as e:
+        print(f"[ERROR] 게시글 {post_id} - 백그라운드 작업 제출 실패: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
     
     # 이벤트 기록 (게시글 작성)
     try:
@@ -1218,10 +1247,28 @@ async def create_comment(request: Request, post_id: int, data: CommentCreate):
         VALUES (%s, %s, %s, %s, %s)
     """, (post_id, user['user_id'], data.content, data.parent_id, content_status))
     
+    # ⭐ 댓글에 대한 이탈 위험도 분석 (백그라운드)
+    try:
+        print(f"[DEBUG] 댓글 {comment_id} - content_status: {content_status}, 백그라운드 작업 제출 시도...", flush=True)
+        if content_status != 'blocked':  # 차단되지 않은 경우만 분석
+            background_executor.submit(
+                analyze_churn_risk_and_store,
+                comment_id,
+                user['user_id'],
+                data.content,
+                datetime.now().isoformat()
+            )
+            print(f"[INFO] 댓글 {comment_id} - 백그라운드 이탈 위험도 분석 시작됨", flush=True)
+        else:
+            print(f"[INFO] 댓글 {comment_id} - 차단됨, 이탈 위험도 분석 건너뜀", flush=True)
+    except Exception as e:
+        print(f"[ERROR] 댓글 {comment_id} - 백그라운드 작업 제출 실패: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+    
     # 이벤트 기록 (댓글 작성)
     try:
         from chrun_backend.user_hash_utils import get_user_hash_for_event
-        from datetime import datetime
         user_hash = get_user_hash_for_event(user['user_id'])
         execute_query(
             "INSERT INTO events (user_hash, action, channel, created_at) VALUES (%s, %s, %s, %s)",

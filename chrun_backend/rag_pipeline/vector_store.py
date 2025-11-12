@@ -298,7 +298,7 @@ class VectorStore:
             # 어댑터를 통해 저장
             self.adapter.upsert(embedding, final_metadata)
             
-            print(f"[INFO] 고위험 문장 저장 완료: {sentence[:50]}... (위험점수: {final_metadata.get('risk_score', 0.0)}, 확정: {confirmed})")
+            # print(f"[INFO] 고위험 문장 저장 완료: {sentence[:50]}... (위험점수: {final_metadata.get('risk_score', 0.0)}, 확정: {confirmed})")  # 빈번하므로 주석 처리
             
         except Exception as e:
             print(f"[ERROR] 고위험 문장 저장 실패: {e}")
@@ -357,7 +357,7 @@ class VectorStore:
                 }
                 formatted_results.append(formatted_result)
             
-            print(f"[INFO] 유사 문장 검색 완료: {len(formatted_results)}개 발견 (Top-{top_k})")
+            # print(f"[INFO] 유사 문장 검색 완료: {len(formatted_results)}개 발견 (Top-{top_k})")  # 빈번하므로 주석 처리
             return formatted_results
             
         except Exception as e:

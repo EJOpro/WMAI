@@ -513,6 +513,27 @@ canvas {
     gap: 1rem;
 }
 
+/* 통계 카드 그리드 - 4개 카드를 한 줄에 배치 */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* 반응형: 작은 화면에서는 2x2 그리드 */
+@media (max-width: 1024px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* 진행바 */
 .progress {
     width: 100%;
@@ -535,6 +556,45 @@ canvas {
 .icon-info { color: var(--info-color); font-size: 1.5rem; display: inline-block; margin-bottom: 0.25rem; }
 .icon-success { color: var(--secondary-color); font-size: 1.5rem; display: inline-block; margin-bottom: 0.25rem; }
 .icon-warning { color: var(--warning-color); font-size: 1.5rem; display: inline-block; margin-bottom: 0.25rem; }
+
+/* 리포트 탭 스타일 */
+.section-block {
+    margin-bottom: 2rem;
+}
+
+.section-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.plain-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.plain-list li {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    line-height: 1.6;
+}
+
+.plain-list li:last-child {
+    border-bottom: none;
+}
+
+.plain-list li i.fas {
+    margin-top: 0.25rem;
+    flex-shrink: 0;
+}
 
 /* 반응형 */
 @media (max-width: 1024px) {

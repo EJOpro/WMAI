@@ -16,7 +16,7 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True)
 
-# 로깅 설정 (RAG 파이프라인 상세 로그 출력)
+# 로깅 설정 (중요한 로그만 출력)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
@@ -24,8 +24,11 @@ logging.basicConfig(
     force=True  # 기존 설정 덮어쓰기
 )
 
-# RAG 파이프라인 로그를 더 상세하게 출력
-logging.getLogger('chrun_backend.rag_pipeline').setLevel(logging.DEBUG)
+# 불필요한 로그 레벨 조정 (WARNING 이상만 출력)
+logging.getLogger('httpx').setLevel(logging.WARNING)  # HTTP 요청 로그 숨김
+logging.getLogger('chrun_backend.rag_pipeline').setLevel(logging.INFO)  # DEBUG → INFO
+logging.getLogger('chrun_backend.rag_pipeline.embedding_service').setLevel(logging.WARNING)  # 임베딩 생성 로그 숨김
+logging.getLogger('chrun_backend.rag_pipeline.vector_db').setLevel(logging.WARNING)  # 벡터DB 검색 로그 숨김
 logging.getLogger('chrun_backend.rag_pipeline.rag_checker').setLevel(logging.INFO)
 logging.getLogger('chrun_backend.rag_pipeline.rag_decider').setLevel(logging.INFO)
 

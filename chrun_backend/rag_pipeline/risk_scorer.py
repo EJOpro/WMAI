@@ -17,7 +17,7 @@ load_dotenv()
 try:
     import openai
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     
     if OPENAI_API_KEY:
         openai.api_key = OPENAI_API_KEY
@@ -31,7 +31,7 @@ except ImportError:
 
 class RiskThresholdSettings(BaseSettings):
     rag_risk_threshold: Optional[float] = None
-    risk_threshold: float = 0.75
+    risk_threshold: float = 0.70  # 고위험 판단 임계값 (0.70 이상)
 
     class Config:
         env_file = ".env"
@@ -75,6 +75,9 @@ class RiskScorer:
             print(f"[INFO] RiskScorer THRESHOLD 적용: {THRESHOLD:.2f}")
             _THRESHOLD_LOGGED = True
 
+        # ⭐ LLM 분석 결과 캐시 (같은 문장은 같은 결과 반환)
+        self._analysis_cache = {}
+        
         # 위험 키워드 패턴들 (추후 확장 가능)
         # | 구분        | 가중치 | 예시 키워드(확장됨)                                   |
         # | HIGH       | +0.45  | 탈퇴, 그만둘, 최악, 꺼져, 지옥, 환멸                  |
@@ -88,7 +91,7 @@ class RiskScorer:
                 "keywords": [
                     '그만둘', '포기', '떠날', '나갈', '싫어', '짜증', '화나', '실망',
                     '의미없', '소용없', '헛된', '시간낭비', '별로', '최악', '탈퇴', '접을까',
-                    '환멸', '지옥', '불매', '못해먹'
+                    '환멸', '지옥', '불매', '못해먹', '차단', '밴', '강퇴', '쫓겨'
                 ],
             },
             {
@@ -105,7 +108,8 @@ class RiskScorer:
                 "keywords": [
                     '어려워', '힘들어', '복잡해', '모르겠', '이해안돼', '답답해',
                     '지쳐', '피곤해', '귀찮아', '번거로워', '짜증나', '열받', '다른 서비스',
-                    '대안', '포기할까', '갈아탈', '마음이 떠났'
+                    '대안', '포기할까', '갈아탈', '마음이 떠났', '다른 곳', '옮길', '이동할',
+                    '정지', '제재', '불공정', '억울'
                 ],
             },
             {
@@ -145,16 +149,32 @@ class RiskScorer:
         scored_sentences = []
         high_risk_candidates = []  # 임계값을 넘은 고위험 문장들
         
-        print(f"[INFO] {len(sentences)}개 문장에 대한 이탈 위험도 분석을 시작합니다...")
+        print(f"[INFO] {len(sentences)}개 문장에 대한 이탈 위험도 분석을 시작합니다...", flush=True)
         
         for i, sentence_data in enumerate(sentences):
             sentence = sentence_data.get('sentence', '')
             
-            print(f"[INFO] 문장 {i+1}/{len(sentences)} 분석 중: {sentence[:50]}...")
+            print(f"[INFO] 문장 {i+1}/{len(sentences)} 분석 중: {sentence[:50]}...", flush=True)
             
-            # 실제 LLM을 사용한 위험 점수 계산
+            # ⭐ 문맥 정보 추출 (제목 + 이전/다음 문장)
+            # 제목을 이전 문장 앞에 추가 (가장 중요한 문맥)
+            title = sentence_data.get('title', '')
+            prev_sentence = sentence_data.get('prev_sentence', '')
+            next_sentence = sentence_data.get('next_sentence', '')
+            
+            # ⭐ 디버그: 제목 확인
+            if title:
+                print(f"[DEBUG] 제목 감지됨: '{title}' (문장: {sentence[:30]}...)", flush=True)
+            
+            # 제목이 있으면 문맥 강화
+            if title and prev_sentence:
+                prev_sentence = f"[제목: {title}] {prev_sentence}"
+            elif title:
+                prev_sentence = f"[제목: {title}]"
+            
+            # 실제 LLM을 사용한 위험 점수 계산 (문맥 정보 포함)
             # 이 부분은 실제 LLM 호출이며, 운영 시 비용이 든다
-            analysis = self.score_sentence(sentence)
+            analysis = self.score_sentence(sentence, prev_sentence, next_sentence)
             risk_score = analysis["risk_score"]
             risk_level = analysis["risk_level"]
             reasons = analysis["reasons"]
@@ -178,9 +198,9 @@ class RiskScorer:
             # 고위험 문장은 별도 리스트에 추가
             if is_high_risk:
                 high_risk_candidates.append(scored_data)
-                print(f"[WARN] 고위험 문장 발견 (점수: {risk_score:.3f}): {sentence[:100]}...")
+                print(f"[WARN] 고위험 문장 발견 (점수: {risk_score:.3f}): {sentence[:100]}...", flush=True)
         
-        print(f"[INFO] 분석 완료. 총 {len(scored_sentences)}개 문장 중 {len(high_risk_candidates)}개가 고위험으로 분류됨")
+        print(f"[INFO] 분석 완료. 총 {len(scored_sentences)}개 문장 중 {len(high_risk_candidates)}개가 고위험으로 분류됨", flush=True)
         
         # 고위험 문장들을 관리자 대시보드용 저장소에 저장
         if high_risk_candidates:
@@ -196,27 +216,48 @@ class RiskScorer:
             "high_risk_candidates": high_risk_candidates
         }
     
-    def score_sentence(self, sentence: str) -> Dict[str, Any]:
+    def score_sentence(self, sentence: str, prev_sentence: str = "", next_sentence: str = "", title: str = "") -> Dict[str, Any]:
         """
         단일 문장의 위험 점수와 근거를 계산합니다.
+        
+        Args:
+            sentence (str): 분석할 문장
+            prev_sentence (str, optional): 이전 문장 (문맥 정보)
+            next_sentence (str, optional): 다음 문장 (문맥 정보)
+            title (str, optional): 글 제목 (제목-본문 충돌 체크용)
         """
         keyword_score, keyword_level, keyword_reasons = self._calculate_risk_score(sentence)
-        llm_score = self._call_llm_for_risk_analysis(sentence)
+        llm_score = self._call_llm_for_risk_analysis(sentence, prev_sentence, next_sentence)
+        
+        # ⭐ RAG: 유사 사례 검색
+        similar_cases = self._search_similar_confirmed_cases(sentence)
 
-        weighted_scores: List[Tuple[float, float]] = []
-        if keyword_score > 0:
-            weighted_scores.append((keyword_score, 0.6))
+        print(f"[DEBUG] score_sentence - keyword_score: {keyword_score:.3f}, llm_score: {llm_score:.3f}")
+
+        # LLM 점수가 있으면 LLM만 사용 (더 정확함)
+        # LLM이 없으면 키워드 점수 사용
         if llm_score > 0:
-            weight = 0.4 if keyword_score > 0 else 1.0
-            weighted_scores.append((llm_score, weight))
-
-        if weighted_scores:
-            final_score = sum(score * weight for score, weight in weighted_scores) / sum(weight for _, weight in weighted_scores)
+            final_score = llm_score
         else:
             final_score = keyword_score  # 0 또는 음수 포함
 
         final_score = max(0.0, min(1.0, final_score))
         final_level = self._score_to_level(final_score)
+        
+        # ⭐ 신뢰도 계산
+        confidence, confidence_level = self._calculate_confidence(
+            llm_score, similar_cases, keyword_score, final_score
+        )
+        
+        # ⭐ 제목-본문 충돌 체크
+        title_conflict = False
+        title_conflict_reason = ""
+        if title and final_score >= THRESHOLD:  # 고위험일 때만 체크
+            title_conflict, title_conflict_reason = self._check_title_content_conflict(
+                title, sentence, final_score
+            )
+        
+        print(f"[DEBUG] score_sentence - final_score: {final_score:.3f}, confidence: {confidence_level}, is_high_risk: {final_score >= THRESHOLD}")
 
         reasons = list(dict.fromkeys(keyword_reasons))  # 중복 제거 유지 순서
         if llm_score > 0:
@@ -231,6 +272,10 @@ class RiskScorer:
             "reasons": reasons,
             "keyword_score": keyword_score,
             "llm_score": llm_score,
+            "confidence": confidence,
+            "confidence_level": confidence_level,
+            "title_conflict": title_conflict,
+            "title_conflict_reason": title_conflict_reason,
         }
 
     def _calculate_risk_score(self, sentence: str) -> tuple[float, str, List[str]]:
@@ -404,21 +449,201 @@ class RiskScorer:
         except Exception as e:
             print(f"[ERROR] 고위험 문장 저장소 저장 중 오류 발생: {e}")
     
-    def _call_llm_for_risk_analysis(self, sentence: str) -> float:
+    def _search_similar_confirmed_cases(self, sentence: str, top_k: int = 3, min_score: float = 0.7) -> List[Dict[str, Any]]:
         """
-        LLM을 호출하여 문장의 이탈 위험도를 분석
+        벡터DB에서 유사한 확정된 사례를 검색 (RAG)
+        
+        Args:
+            sentence: 검색할 문장
+            top_k: 최대 반환 개수
+            min_score: 최소 유사도 (0.0~1.0)
+            
+        Returns:
+            유사 사례 리스트 [{sentence, confirmed, similarity, risk_score}, ...]
+        """
+        try:
+            from .embedding_service import get_embedding
+            from .vector_db import get_client, search_similar
+            
+            # 1. 임베딩 생성
+            embedding = get_embedding(sentence)
+            
+            # 2. 벡터DB에서 유사 문장 검색
+            client = get_client()
+            if not client:
+                print("[WARN] ChromaDB 클라이언트를 사용할 수 없습니다. RAG 건너뜀.")
+                return []
+            
+            results = search_similar(
+                client=client,
+                embedding=embedding,
+                top_k=top_k,
+                min_score=min_score,
+                collection_name="confirmed_risk"
+            )
+            
+            # 3. 결과 포맷팅
+            similar_cases = []
+            for result in results:
+                metadata = result.get('metadata', {})
+                similar_cases.append({
+                    'sentence': result.get('document', ''),
+                    'confirmed': metadata.get('confirmed', False),
+                    'similarity': result.get('score', 0.0),
+                    'risk_score': metadata.get('risk_score', 0.0),
+                    'user_id': metadata.get('user_id', ''),
+                    'created_at': metadata.get('created_at', '')
+                })
+            
+            if similar_cases:
+                print(f"[DEBUG] RAG: '{sentence[:30]}...'와 유사한 사례 {len(similar_cases)}건 발견", flush=True)
+            
+            return similar_cases
+            
+        except Exception as e:
+            print(f"[ERROR] 벡터DB 검색 실패: {e}", flush=True)
+            return []
+    
+    def _calculate_confidence(
+        self, 
+        llm_score: float, 
+        similar_cases: List[Dict[str, Any]], 
+        keyword_score: float,
+        final_score: float
+    ) -> tuple[float, str]:
+        """
+        판단 신뢰도 계산
+        
+        Args:
+            llm_score: LLM 점수
+            similar_cases: 유사 사례 리스트
+            keyword_score: 키워드 점수
+            final_score: 최종 위험 점수
+            
+        Returns:
+            tuple: (신뢰도 점수 0.0~1.0, 신뢰도 레벨 'high'/'medium'/'low')
+        """
+        confidence = 0.0
+        
+        # 1. LLM 점수 존재 여부 (+0.3)
+        if llm_score > 0:
+            confidence += 0.3
+        
+        # 2. 유사 사례 개수 및 유사도 (최대 +0.4)
+        if similar_cases:
+            num_cases = len(similar_cases)
+            avg_similarity = sum(case.get('similarity', 0) for case in similar_cases) / num_cases
+            
+            # 유사 사례 개수 기여도
+            if num_cases >= 3:
+                confidence += 0.2
+            elif num_cases >= 1:
+                confidence += 0.1
+            
+            # 평균 유사도 기여도
+            if avg_similarity >= 0.8:
+                confidence += 0.2
+            elif avg_similarity >= 0.7:
+                confidence += 0.1
+        
+        # 3. 키워드-LLM 점수 일치도 (+0.3)
+        if llm_score > 0 and keyword_score > 0:
+            score_diff = abs(llm_score - keyword_score)
+            if score_diff < 0.1:
+                confidence += 0.3  # 거의 일치
+            elif score_diff < 0.3:
+                confidence += 0.2  # 어느 정도 일치
+            else:
+                confidence += 0.1  # 불일치
+        elif llm_score > 0:
+            confidence += 0.15  # LLM만 있음
+        
+        confidence = max(0.0, min(1.0, confidence))
+        
+        # 레벨 분류
+        if confidence >= 0.75:
+            level = "high"
+        elif confidence >= 0.5:
+            level = "medium"
+        else:
+            level = "low"
+        
+        return confidence, level
+    
+    def _check_title_content_conflict(
+        self, 
+        title: str, 
+        content: str, 
+        risk_score: float
+    ) -> tuple[bool, str]:
+        """
+        제목과 본문의 대상이 다른지 체크 (간단한 휴리스틱)
+        
+        Args:
+            title: 글 제목
+            content: 분석 대상 문장
+            risk_score: 위험 점수
+            
+        Returns:
+            tuple: (충돌 여부, 충돌 이유)
+        """
+        if not title or not content:
+            return False, ""
+        
+        title_lower = title.lower()
+        content_lower = content.lower()
+        
+        # 외부 대상을 언급하는 키워드 (다른 곳/사이트/앱/서비스 등)
+        external_keywords = [
+            "다른", "다은", "딴", "타", "외부", "다른곳", "다른사이트", "다른앱", 
+            "다른서비스", "다른플랫폼", "경쟁", "라이벌"
+        ]
+        
+        # 제목에 외부 대상 언급이 있는지
+        title_has_external = any(kw in title_lower for kw in external_keywords)
+        
+        # 본문에 이탈 의도 키워드가 있는지
+        churn_keywords = [
+            "탈퇴", "그만", "떠나", "이탈", "나가", "떠날", "안쓸", "안 쓸",
+            "관둘", "그만둘", "안할", "안 할", "그만할", "포기"
+        ]
+        content_has_churn = any(kw in content_lower for kw in churn_keywords)
+        
+        # 충돌 판정: 제목은 외부 대상 비판, 본문은 이탈 의도
+        if title_has_external and content_has_churn:
+            return True, "제목은 외부 대상 언급, 본문은 서비스 이탈 의도 표현 (검토 권장)"
+        
+        return False, ""
+    
+    def _call_llm_for_risk_analysis(self, sentence: str, prev_sentence: str = "", next_sentence: str = "") -> float:
+        """
+        LLM을 호출하여 문장의 이탈 위험도를 분석 (캐싱 및 문맥 정보 지원)
         
         이 부분은 실제 LLM 호출이며, 운영 시 비용이 든다.
         OpenAI GPT API를 사용하여 문장의 이탈 위험도를 0.0~1.0 사이의 점수로 계산한다.
         
         Args:
             sentence (str): 분석할 문장
+            prev_sentence (str, optional): 이전 문장 (문맥 정보)
+            next_sentence (str, optional): 다음 문장 (문맥 정보)
             
         Returns:
             float: 0.0~1.0 사이의 위험 점수 (실패 시 기본값 0.0)
         """
         if not sentence or not sentence.strip():
             return 0.0
+        
+        # ⭐ 벡터DB에서 유사 사례 검색 (RAG)
+        similar_cases = self._search_similar_confirmed_cases(sentence)
+        
+        # ⭐ 캐시 키 생성 (문장 + 문맥 + 유사 사례 수로 고유한 키 생성)
+        cache_key = f"{sentence}|{prev_sentence}|{next_sentence}|{len(similar_cases)}"
+        
+        # ⭐ 캐시 확인 (같은 문장+문맥은 같은 결과 반환)
+        if cache_key in self._analysis_cache:
+            cached_score = self._analysis_cache[cache_key]
+            print(f"[DEBUG] 캐시된 결과 사용 - '{sentence[:30]}...' -> {cached_score:.3f}", flush=True)
+            return cached_score
             
         # OpenAI API가 사용 가능한지 확인
         if not openai or not OPENAI_API_KEY:
@@ -426,18 +651,172 @@ class RiskScorer:
             return 0.0
             
         try:
-            # 이탈 위험도 분석을 위한 프롬프트
-            prompt = f"""이 문장이 '서비스를 그만 쓸 것 같다 / 탈퇴할 것 같다 / 완전히 실망했다 / 가치가 없다' 같은 이탈 의도를 얼마나 강하게 표현하는지 0.00~1.00 숫자만 답해.
-
+            # ⭐ 문맥 정보 구성 (게시글 제목 + 이전/다음 문장)
+            context_info = ""
+            has_context = prev_sentence or next_sentence
+            
+            if has_context:
+                context_info = "\n\n📌 문맥 정보 (더 정확한 분석을 위해 고려):\n"
+                if prev_sentence:
+                    context_info += f"  • 이전 문장: \"{prev_sentence}\"\n"
+                context_info += f"  • 현재 문장: \"{sentence}\" ← 이 문장을 평가하세요\n"
+                if next_sentence:
+                    context_info += f"  • 다음 문장: \"{next_sentence}\"\n"
+                context_info += "\n⚠️ 현재 문장이 불완전해 보이면 문맥을 함께 고려하세요.\n"
+            
+            # ⭐ RAG: 과거 유사 사례 추가 (벡터DB 검색 결과)
+            if similar_cases:
+                context_info += "\n\n🔍 과거 유사 사례 (관리자가 확정한 판정):\n"
+                for i, case in enumerate(similar_cases[:3], 1):  # 최대 3개만
+                    confirmed_label = "✅ 위험 맞음" if case.get('confirmed') else "❌ 위험 아님"
+                    similarity = case.get('similarity', 0) * 100
+                    context_info += f"  {i}. \"{case['sentence'][:60]}...\"\n"
+                    context_info += f"     → 최종 판정: {confirmed_label} (유사도: {similarity:.0f}%)\n"
+                context_info += "\n⚠️ 위 사례들을 참고하여 일관되게 판단하세요.\n"
+                print(f"[DEBUG] RAG: {len(similar_cases)}개 유사 사례를 프롬프트에 추가", flush=True)
+            
+            # 개선된 이탈 위험도 분석 프롬프트 (대상 명시 강화)
+            prompt = f"""이 문장의 커뮤니티/서비스 이탈 위험도를 0.00~1.00 사이의 숫자로 평가하세요.
+{context_info}
 문장: "{sentence}"
 
-평가 기준:
-- 0.00~0.30: 긍정적이거나 중립적 (만족, 좋아함, 계속 사용 의도)
-- 0.31~0.60: 약간의 불만이나 고민 (개선 요구, 아쉬움 표현)
-- 0.61~0.80: 강한 불만이나 실망 (화남, 짜증, 문제 제기)
-- 0.81~1.00: 이탈 의도 명확 (그만두기, 탈퇴, 포기 의사)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 평가 전 필수 확인사항:
 
-숫자만 답해:"""
+⚠️ 1단계: **브랜드/제품명 확인** (최우선!)
+   
+   ❌ 다음 키워드가 있으면 음식점/제품 리뷰입니다 (점수 0.10~0.20):
+      - 음식점: "피자", "치킨", "버거", "카페", "레스토랑", "음식점"
+      - 브랜드: "도미노", "맥도날드", "스타벅스", "이재모" 등
+      - 제품: "아이폰", "갤럭시", "맥북", "에어팟" 등
+      - 장소: "영화관", "헬스장", "PC방", "노래방" 등
+      
+   ✅ 브랜드명 없이 서비스 명시:
+      - "여기", "이 서비스", "이 커뮤니티", "이 사이트"
+      - "탈퇴", "계정 삭제", "이 플랫폼"
+
+⚠️ 2단계: **제목 확인**
+   
+   - 제목에 위 브랜드/제품명이 있으면 → 리뷰 글 (점수 0.10~0.20)
+   - 제목에 "탈퇴", "그만둘까" 등이 있으면 → 이탈 글
+
+⚠️ 3단계: **대상 명시 확인**
+   
+   ❌ 대상 불명확한 경우 (점수 0.00~0.30):
+      - "다른 플랫폼 알아보는 중" → 공부/학습 플랫폼일 수도
+      - "그만둘 때가 됐다" → 직장/학교일 수도
+      - "나은 곳이 많더라" → 장소일 수도
+      - 대상이 전혀 명시되지 않은 일반적 불만
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 평가 단계별 가이드:
+
+1️⃣ 대상 명시 확인 (최우선!)
+   ✅ 명시됨: 위에 열거한 키워드들
+   ❌ 불명확: 대상 없는 일반적 감정 표현 → 위험도 최대 0.30
+
+2️⃣ 이탈 단계 판단:
+   [1단계] 활발 참여 (0.00-0.15): 긍정, 만족, 적극 참여
+   [2단계] 소극 참여 (0.15-0.35): 무관심, 가끔 방문
+   [3단계] 관계 단절 (0.35-0.60): 소통 안돼, 사람들 별로, 실망
+   [4단계] 대안 탐색 (0.60-0.80): 다른 곳 알아봄, 갈아탈까 고민
+   [5단계] 이탈 결정 (0.80-1.00): 탈퇴, 그만둠, 포기, 떠남
+
+3️⃣ 핵심 키워드:
+   🔴 HIGH (0.75+): 탈퇴, 떠남, 그만둠, 포기, 소용없, 의미없, 갈아타
+   🟠 MEDIUM (0.50+): 다른 곳, 힘들어, 지쳐, 답답, 불만
+   🟡 LOW (0.30+): 아쉬워, 불편해, 개선 필요
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 평가 예시 (브랜드/제품명 확인 최우선!):
+
+❌ LOW - 브랜드명 감지 (음식점 리뷰):
+[제목: "피자 맛집"] "도미노 피자가 더 나은듯??"
+→ 브랜드명: "도미노", "피자" 감지
+→ 음식점 리뷰 판정 → 점수: 0.15
+
+❌ LOW - 브랜드명 감지 (음식점 리뷰):
+[제목: "피자 맛집"] "이재모 피자 맛없음 ㅋㅋ"
+→ 브랜드명: "이재모", "피자" 감지
+→ 음식점 리뷰 판정 → 점수: 0.15
+
+❌ LOW - 브랜드명 감지 + 불명확한 표현:
+[제목: "피자 맛집"] "이제 바이바이임"
+→ 제목에 "피자" 감지
+→ "바이바이"만으로는 서비스 이탈 불명확
+→ 음식점 맥락 → 점수: 0.20
+
+✅ HIGH - 대상 명확 + 이탈 의도 명확:
+[제목: "탈퇴 고민"] "여기 있어봐자 소용없을듯요"
+→ 브랜드명: 없음
+→ 대상: "여기" = 현재 서비스
+→ 이탈 의도: 명확 → 점수: 0.85
+
+✅ HIGH - 제목으로 대상 확인:
+[제목: "더 이상은 못하겠습니다"] "이제 정말 그만둘 때가 된 것 같습니다"
+→ 브랜드명: 없음
+→ 제목에서 서비스 이탈 명시
+→ 점수: 0.85
+
+❌ LOW - 대상 불명확 (직장/학교일 수도):
+"이제 정말 그만둘 때가 된 것 같습니다"
+→ 브랜드명: 없음
+→ 제목 없음, 대상 불명확
+→ 점수: 0.30
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ 중요 원칙 (반드시 준수):
+
+1️⃣ **과거 유사 사례 최우선 참고!** ⭐ 가장 중요!
+   - 위에 과거 사례가 있으면 그 판정을 따르세요
+   - 유사도 70% 이상이면 거의 동일한 케이스입니다
+   - 일관성 유지가 핵심입니다
+
+2️⃣ **브랜드/제품명 확인**
+   - 피자, 치킨, 버거, 카페 등 → 음식점 리뷰 (0.10~0.20)
+   - 도미노, 맥도날드, 이재모 등 → 브랜드 리뷰 (0.10~0.20)
+   - 아이폰, 갤럭시, 맥북 등 → 제품 리뷰 (0.10~0.20)
+   - 영화관, 헬스장, PC방 등 → 장소 리뷰 (0.10~0.20)
+
+3️⃣ **제목 확인**
+   - 제목에 브랜드/제품명 있으면 → 리뷰 글 (0.10~0.20)
+   - 제목에 "탈퇴", "그만둘까", "더 이상" 등 → 이탈 글
+
+4️⃣ **대상 명시 필수**
+   - 브랜드명 없어도 대상 불명확하면 → 최대 0.30
+   - "여기", "이 서비스", "이 커뮤니티", "탈퇴" 등 필수
+
+5️⃣ **보수적 평가**
+   - 불명확하면 낮게 점수 부여
+   - 의심스러우면 0.20 이하로
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 출력 형식 (반드시 준수):
+- 반드시 0.00~1.00 사이의 숫자만 출력하세요
+- 설명, 이유, 텍스트는 절대 포함하지 마세요
+- 올바른 예: 0.75
+- 잘못된 예: "이 문장은 이탈 의도가 있습니다", "0.75점", "점수: 0.75"
+
+숫자만 답해 (예: 0.75):"""
+
+            # 개선된 System 프롬프트
+            system_prompt = """당신은 커뮤니티/서비스 이탈 징후를 정밀하게 분석하는 전문가입니다.
+
+🚨 중요: 반드시 0.00~1.00 사이의 숫자만 출력하세요. 설명이나 텍스트는 절대 포함하지 마세요!
+
+핵심 원칙:
+1. 대상(서비스/커뮤니티) 명시 여부를 최우선 확인
+2. 단순 불만과 이탈 의도를 명확히 구분
+3. 문맥과 어조를 종합 고려
+4. 0.75 이상은 명확한 이탈 의도만 부여
+5. 반드시 숫자만 답변 (예: 0.75)
+
+과대평가 방지:
+- 대상 불명확 시 보수적 평가
+- 운영 불만 ≠ 이탈 위험
+- 일반적 감정 표현에 낮은 점수 부여
+
+출력 예시: 0.75 (숫자만!)"""
 
             # OpenAI API 호출
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -445,11 +824,12 @@ class RiskScorer:
             response = client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=[
-                    {"role": "system", "content": "당신은 사용자 이탈 위험도를 정확히 분석하는 전문가입니다. 주어진 문장을 분석하여 0.00~1.00 사이의 숫자만 정확히 답해주세요."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=10,
-                temperature=0.1  # 일관된 결과를 위해 낮은 temperature 사용
+                max_tokens=20,  # ⭐ 10→20으로 증가 (숫자 응답에 충분)
+                temperature=0,  # ⭐ 0으로 설정 (일관된 결과)
+                seed=42  # ⭐ 고정된 seed로 재현 가능성 확보
             )
             
             # 응답에서 점수 추출
@@ -464,11 +844,28 @@ class RiskScorer:
                 # 0.0~1.0 범위로 정규화
                 score = max(0.0, min(1.0, score))
                 
-                print(f"[DEBUG] LLM 분석 결과 - 문장: '{sentence[:30]}...' -> 점수: {score:.3f}")
+                # ⭐ 캐시에 저장 (다음번에 같은 문장은 API 호출 없이 반환)
+                self._analysis_cache[cache_key] = score
+                
+                print(f"[DEBUG] LLM 분석 결과 - 문장: '{sentence[:30]}...' -> 점수: {score:.3f}", flush=True)
                 return score
             else:
-                print(f"[WARN] LLM 응답에서 점수를 추출할 수 없습니다: {response_text}")
-                return 0.0
+                # ⚠️ LLM 파싱 실패 시 키워드 점수를 fallback으로 사용
+                print(f"[WARN] LLM 응답에서 점수를 추출할 수 없습니다: {response_text[:100]}...", flush=True)
+                keyword_score, _, keyword_reasons = self._calculate_risk_score(sentence)
+                
+                # 키워드 점수를 기반으로 fallback 점수 생성
+                # 키워드 점수가 있으면 사용하고, 없으면 중간값(0.5) 사용
+                fallback_score = max(0.5, keyword_score) if keyword_score > 0 else 0.5
+                fallback_score = max(0.0, min(1.0, fallback_score))
+                
+                print(f"[WARN] Fallback: 키워드 점수 {keyword_score:.3f} -> 사용 점수 {fallback_score:.3f}", flush=True)
+                print(f"[WARN] 키워드 요인: {keyword_reasons[:3]}", flush=True)  # 상위 3개만
+                
+                # 캐시에 fallback 점수 저장
+                self._analysis_cache[cache_key] = fallback_score
+                
+                return fallback_score
                 
         except openai.RateLimitError:
             print("[ERROR] OpenAI API 요청 한도 초과. 기본값 0.0을 반환합니다.")
