@@ -98,6 +98,32 @@ async def reports_admin(request: Request):
         {"request": request, "title": "신고 관리"}
     )
 
+@router.get("/messages", response_class=HTMLResponse)
+async def messages_page(request: Request):
+    """메시지함 페이지"""
+    return templates.TemplateResponse(
+        "pages/messages.html",
+        {"request": request, "title": "메시지함"}
+    )
+
+# RAG 관련 코드 (테스트 완료 전까지 주석 처리)
+# @router.get("/admin/rag-check", response_class=HTMLResponse)
+# async def admin_rag_check(request: Request):
+#     """RAG 기반 위험도 분석 테스트 페이지"""
+#     return templates.TemplateResponse(
+#         "pages/admin_rag_check.html",
+#         {"request": request, "title": "RAG 위험도 분석"}
+#     )
+
+
+@router.get("/admin/rag-auto", response_class=HTMLResponse)
+async def admin_rag_auto(request: Request):
+    """자동 RAG 판정 결과 페이지"""
+    return templates.TemplateResponse(
+        "pages/admin_rag_auto.html",
+        {"request": request, "title": "자동 RAG 판정 결과"}
+    )
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """로그인 페이지"""

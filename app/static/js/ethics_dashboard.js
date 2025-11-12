@@ -559,10 +559,10 @@ const dataLoader = {
         
         const maxSimilarity = (ragDetails.max_similarity * 100).toFixed(1);
         const adjustmentWeight = (ragDetails.adjustment_weight * 100).toFixed(1);
-        const originalScore = ragDetails.original_immoral_score ? ragDetails.original_immoral_score.toFixed(1) : '-';
-        const adjustedScore = ragDetails.adjusted_immoral_score ? ragDetails.adjusted_immoral_score.toFixed(1) : '-';
-        const originalSpam = ragDetails.original_spam_score ? ragDetails.original_spam_score.toFixed(1) : '-';
-        const adjustedSpam = ragDetails.adjusted_spam_score ? ragDetails.adjusted_spam_score.toFixed(1) : '-';
+        const originalScore = ragDetails.original_immoral_score != null ? ragDetails.original_immoral_score.toFixed(1) : '-';
+        const adjustedScore = ragDetails.adjusted_immoral_score != null ? ragDetails.adjusted_immoral_score.toFixed(1) : '-';
+        const originalSpam = ragDetails.original_spam_score != null ? ragDetails.original_spam_score.toFixed(1) : '-';
+        const adjustedSpam = ragDetails.adjusted_spam_score != null ? ragDetails.adjusted_spam_score.toFixed(1) : '-';
         
         // 즉시 차단 배지
         const autoBlockBadge = isAutoBlocked 
@@ -1781,11 +1781,482 @@ window.confirmLog = async function(logId, action) {
     }
 };
 
+// ============================================
+// 이미지 분석 관련 함수
+// ============================================
+
+const imageAnalysis = {
+    currentPage: 1,
+    currentLimit: 20,
+    blockedFilter: '',
+    
+    // 이미지 분석 통계 로드
+    async loadImageStats() {
+        try {
+            const response = await fetch('/api/admin/images/stats');
+            if (!response.ok) throw new Error('통계 로드 실패');
+            
+            const data = await response.json();
+            const stats = data.total_stats;
+            
+            // 통계 업데이트
+            document.getElementById('imageAnalyzedCount').textContent = stats.total_analyzed || 0;
+            document.getElementById('imageBlockedCount').textContent = stats.total_blocked || 0;
+            document.getElementById('imageNsfwCount').textContent = stats.total_nsfw || 0;
+            
+            const avgTime = stats.avg_response_time != null ? `${stats.avg_response_time.toFixed(2)}초` : '-';
+            document.getElementById('imageAvgResponseTime').textContent = avgTime;
+            
+            const avgImmoral = stats.avg_immoral_score != null ? stats.avg_immoral_score.toFixed(1) : '-';
+            const avgSpam = stats.avg_spam_score != null ? stats.avg_spam_score.toFixed(1) : '-';
+            const avgNsfw = stats.avg_nsfw_confidence != null ? stats.avg_nsfw_confidence.toFixed(1) : '-';
+            
+            document.getElementById('imageAvgImmoral').textContent = avgImmoral;
+            document.getElementById('imageAvgSpam').textContent = avgSpam;
+            document.getElementById('imageAvgNsfwConf').textContent = avgNsfw;
+            
+        } catch (error) {
+            console.error('이미지 통계 로드 실패:', error);
+        }
+    },
+    
+    // 이미지 분석 로그 로드
+    async loadImageLogs() {
+        try {
+            utils.showLoading();
+            
+            const params = new URLSearchParams({
+                page: this.currentPage,
+                limit: this.currentLimit
+            });
+            
+            if (this.blockedFilter) {
+                params.append('blocked_only', this.blockedFilter === 'true');
+            }
+            
+            const response = await fetch(`/api/admin/images/logs?${params}`);
+            if (!response.ok) throw new Error('로그 로드 실패');
+            
+            const data = await response.json();
+            this.renderImageLogs(data.logs);
+            this.updateImagePagination(data.pagination);
+            
+            document.getElementById('imageLogCount').textContent = 
+                `${data.pagination.total}개`;
+            
+        } catch (error) {
+            console.error('이미지 로그 로드 실패:', error);
+            document.getElementById('imageLogsTableBody').innerHTML = 
+                '<tr><td colspan="10" style="text-align:center; padding:40px; color:#6B7280;">로그를 불러오지 못했습니다.</td></tr>';
+        } finally {
+            utils.hideLoading();
+        }
+    },
+    
+    // 이미지 로그 렌더링
+    renderImageLogs(logs) {
+        const tbody = document.getElementById('imageLogsTableBody');
+        
+        if (!logs || logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:40px; color:#6B7280;">로그가 없습니다.</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = logs.map(log => {
+            const nsfwBadge = log.is_nsfw 
+                ? `<span class="status-badge status-nsfw">NSFW ${(log.nsfw_confidence || 0).toFixed(0)}%</span>`
+                : `<span class="status-badge status-normal">정상 ${(log.nsfw_confidence || 0).toFixed(0)}%</span>`;
+            
+            const blockBadge = log.is_blocked
+                ? `<span class="status-badge status-blocked">차단됨</span>`
+                : `<span class="status-badge status-passed">통과</span>`;
+            
+            const getScoreClass = (score) => {
+                if (!score) return 'score-low';
+                if (score >= 70) return 'score-high';
+                if (score >= 40) return 'score-medium';
+                return 'score-low';
+            };
+            
+            const immoralScore = log.immoral_score != null
+                ? `<span class="score-cell ${getScoreClass(log.immoral_score)}">${log.immoral_score.toFixed(0)}</span>`
+                : '-';
+            
+            const spamScore = log.spam_score != null
+                ? `<span class="score-cell ${getScoreClass(log.spam_score)}">${log.spam_score.toFixed(0)}</span>`
+                : '-';
+            
+            const boardLink = log.board_id 
+                ? `<a href="/board/${log.board_id}" target="_blank">${log.board_title || `#${log.board_id}`}</a>`
+                : '-';
+            
+            const uploader = log.uploader_name || '-';
+            
+            const createdAt = new Date(log.created_at).toLocaleString('ko-KR');
+            
+            return `
+                <tr style="cursor: pointer;" onclick="imageAnalysis.viewDetail(${log.id})" title="클릭하여 상세정보 보기">
+                    <td>${log.id}</td>
+                    <td title="${log.filename}">${log.original_name || log.filename.substring(0, 15) + '...'}</td>
+                    <td>${boardLink}</td>
+                    <td>${uploader}</td>
+                    <td>${nsfwBadge}</td>
+                    <td>${immoralScore}</td>
+                    <td>${spamScore}</td>
+                    <td>${blockBadge}</td>
+                    <td>${createdAt}</td>
+                    <td onclick="event.stopPropagation()">
+                        <button class="btn btn-sm btn-danger" onclick="imageAnalysis.deleteLog(${log.id})" title="로그 삭제">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    },
+    
+    // 페이지네이션 업데이트
+    updateImagePagination(pagination) {
+        const { page, total_pages } = pagination;
+        
+        document.getElementById('imagePageInfo').textContent = `${page} / ${total_pages}`;
+        
+        document.getElementById('imageFirstPage').disabled = page <= 1;
+        document.getElementById('imagePrevPage').disabled = page <= 1;
+        document.getElementById('imageNextPage').disabled = page >= total_pages;
+        document.getElementById('imageLastPage').disabled = page >= total_pages;
+    },
+    
+    // 상세 정보 보기
+    async viewDetail(logId) {
+        try {
+            utils.showLoading();
+            
+            // 현재 로드된 로그에서 찾기
+            const tbody = document.getElementById('imageLogsTableBody');
+            const rows = tbody.querySelectorAll('tr');
+            let logData = null;
+            
+            // API로 상세 정보 가져오기 (더 정확한 방법)
+            const response = await fetch(`/api/admin/images/logs?page=1&limit=1000`);
+            if (response.ok) {
+                const data = await response.json();
+                logData = data.logs.find(log => log.id === logId);
+            }
+            
+            if (!logData) {
+                alert('로그 정보를 찾을 수 없습니다.');
+                return;
+            }
+            
+            // 모달 내용 생성
+            const modalBody = document.getElementById('imageLogModalBody');
+            
+            const detectedTypes = logData.detected_types ? JSON.parse(logData.detected_types) : [];
+            const typesHtml = detectedTypes.length > 0 
+                ? detectedTypes.map(t => `<span class="badge badge-warning">${t}</span>`).join(' ')
+                : '<span class="text-muted">없음</span>';
+            
+            const blockReasonHtml = logData.is_blocked && logData.block_reason
+                ? `<div class="alert alert-danger"><i class="fas fa-ban"></i> ${logData.block_reason}</div>`
+                : '';
+            
+            const extractedTextHtml = logData.has_text && logData.extracted_text
+                ? `<div class="detail-section">
+                    <h4><i class="fas fa-text"></i> 이미지 내 추출된 텍스트</h4>
+                    <div class="extracted-text-box">${logData.extracted_text}</div>
+                </div>`
+                : '';
+            
+            modalBody.innerHTML = `
+                ${blockReasonHtml}
+                
+                <div class="detail-grid">
+                    <div class="detail-row">
+                        <span class="detail-label">로그 ID:</span>
+                        <span class="detail-value">${logData.id}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">파일명 (UUID):</span>
+                        <span class="detail-value">${logData.filename}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">원본 파일명:</span>
+                        <span class="detail-value">${logData.original_name || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">파일 크기:</span>
+                        <span class="detail-value">${logData.file_size ? (logData.file_size / 1024).toFixed(2) + ' KB' : '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">게시글:</span>
+                        <span class="detail-value">
+                            ${logData.board_id 
+                                ? `<a href="/board/${logData.board_id}" target="_blank">${logData.board_title || '#' + logData.board_id}</a>` 
+                                : '-'}
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">업로더:</span>
+                        <span class="detail-value">${logData.uploader_name || '-'}</span>
+                    </div>
+                </div>
+                
+                <div class="detail-divider"></div>
+                
+                <h4><i class="fas fa-chart-bar"></i> NSFW 분석 결과 (1차 필터)</h4>
+                <div class="detail-grid">
+                    <div class="detail-row">
+                        <span class="detail-label">NSFW 검사:</span>
+                        <span class="detail-value">${logData.nsfw_checked ? '✅ 실행됨' : '❌ 미실행'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">NSFW 판정:</span>
+                        <span class="detail-value">
+                            ${logData.is_nsfw 
+                                ? '<span class="badge badge-danger">NSFW 감지</span>' 
+                                : '<span class="badge badge-success">정상</span>'}
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">NSFW 신뢰도:</span>
+                        <span class="detail-value">
+                            <strong style="color: ${logData.nsfw_confidence >= 80 ? '#DC2626' : logData.nsfw_confidence >= 60 ? '#F59E0B' : '#059669'}">
+                                ${logData.nsfw_confidence ? logData.nsfw_confidence.toFixed(1) + '%' : '-'}
+                            </strong>
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="detail-divider"></div>
+                
+                <h4><i class="fas fa-robot"></i> Vision API 분석 결과 (2차 검증)</h4>
+                <div class="detail-grid">
+                    <div class="detail-row">
+                        <span class="detail-label">Vision 검사:</span>
+                        <span class="detail-value">${logData.vision_checked ? '✅ 실행됨' : '❌ 미실행'}</span>
+                    </div>
+                    ${logData.vision_checked ? `
+                    <div class="detail-row">
+                        <span class="detail-label">비윤리 점수:</span>
+                        <span class="detail-value">
+                            <strong style="color: ${logData.immoral_score >= 70 ? '#DC2626' : logData.immoral_score >= 40 ? '#F59E0B' : '#059669'}">
+                                ${logData.immoral_score != null ? logData.immoral_score.toFixed(1) : '-'}
+                            </strong>
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">스팸 점수:</span>
+                        <span class="detail-value">
+                            <strong style="color: ${logData.spam_score >= 70 ? '#DC2626' : logData.spam_score >= 40 ? '#F59E0B' : '#059669'}">
+                                ${logData.spam_score != null ? logData.spam_score.toFixed(1) : '-'}
+                            </strong>
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Vision 신뢰도:</span>
+                        <span class="detail-value">${logData.vision_confidence != null ? logData.vision_confidence.toFixed(1) + '%' : '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">감지된 유형:</span>
+                        <span class="detail-value">${typesHtml}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">텍스트 포함:</span>
+                        <span class="detail-value">${logData.has_text ? '✅ 예' : '❌ 아니오'}</span>
+                    </div>
+                    ` : ``}
+                </div>
+                
+                ${extractedTextHtml}
+                
+                <div class="detail-divider"></div>
+                
+                <h4><i class="fas fa-info-circle"></i> 메타데이터</h4>
+                <div class="detail-grid">
+                    <div class="detail-row">
+                        <span class="detail-label">최종 차단 여부:</span>
+                        <span class="detail-value">
+                            ${logData.is_blocked 
+                                ? '<span class="badge badge-danger">차단됨</span>' 
+                                : '<span class="badge badge-success">통과</span>'}
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">분석 소요 시간:</span>
+                        <span class="detail-value">${logData.response_time ? logData.response_time.toFixed(2) + '초' : '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">IP 주소:</span>
+                        <span class="detail-value">${logData.ip_address || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">분석 일시:</span>
+                        <span class="detail-value">${new Date(logData.created_at).toLocaleString('ko-KR')}</span>
+                    </div>
+                </div>
+            `;
+            
+            // 모달 표시
+            document.getElementById('imageLogModal').classList.add('show');
+            
+        } catch (error) {
+            console.error('상세 정보 로드 실패:', error);
+            alert('상세 정보를 불러오는 중 오류가 발생했습니다.');
+        } finally {
+            utils.hideLoading();
+        }
+    },
+    
+    // 페이지 이동
+    goToPage(page) {
+        this.currentPage = page;
+        this.loadImageLogs();
+    },
+    
+    // 필터 적용
+    applyFilters() {
+        this.blockedFilter = document.getElementById('imageBlockedFilter').value;
+        this.currentLimit = parseInt(document.getElementById('imagePageSize').value);
+        this.currentPage = 1;
+        this.loadImageLogs();
+    },
+    
+    // 로그 삭제
+    async deleteLog(logId) {
+        if (!confirm('이 이미지 분석 로그를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) {
+            return;
+        }
+        
+        try {
+            utils.showLoading();
+            
+            const response = await fetch(`/api/admin/images/logs/${logId}`, {
+                method: 'DELETE'
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '로그 삭제 실패');
+            }
+            
+            const result = await response.json();
+            alert('로그가 삭제되었습니다.');
+            
+            // 목록 새로고침
+            await this.loadImageStats();
+            await this.loadImageLogs();
+            
+        } catch (error) {
+            console.error('로그 삭제 실패:', error);
+            alert('로그 삭제 중 오류가 발생했습니다: ' + error.message);
+        } finally {
+            utils.hideLoading();
+        }
+    }
+};
+
+// 탭 전환 함수
+const tabs = {
+    init() {
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabName = button.dataset.tab;
+                this.switchTab(tabName);
+            });
+        });
+    },
+    
+    switchTab(tabName) {
+        // 모든 탭 버튼에서 active 제거
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        // 모든 탭 콘텐츠 숨기기
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        
+        // 선택된 탭 활성화
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+        document.getElementById(`${tabName}AnalysisTab`).classList.add('active');
+        
+        // 이미지 탭으로 전환 시 데이터 로드
+        if (tabName === 'image') {
+            imageAnalysis.loadImageStats();
+            imageAnalysis.loadImageLogs();
+        }
+    }
+};
+
+// 이미지 분석 이벤트 리스너
+const imageEventListeners = {
+    init() {
+        // 필터 적용 버튼
+        document.getElementById('imageApplyFilters')?.addEventListener('click', () => {
+            imageAnalysis.applyFilters();
+        });
+        
+        // 페이지네이션
+        document.getElementById('imageFirstPage')?.addEventListener('click', () => {
+            imageAnalysis.goToPage(1);
+        });
+        
+        document.getElementById('imagePrevPage')?.addEventListener('click', () => {
+            imageAnalysis.goToPage(Math.max(1, imageAnalysis.currentPage - 1));
+        });
+        
+        document.getElementById('imageNextPage')?.addEventListener('click', () => {
+            imageAnalysis.goToPage(imageAnalysis.currentPage + 1);
+        });
+        
+        document.getElementById('imageLastPage')?.addEventListener('click', () => {
+            // 마지막 페이지는 로드 후 알 수 있으므로 임시로 큰 수 사용
+            const totalPages = parseInt(document.getElementById('imagePageInfo').textContent.split('/')[1].trim());
+            imageAnalysis.goToPage(totalPages);
+        });
+        
+        // 이미지 로그 모달 닫기
+        document.getElementById('closeImageLogModal')?.addEventListener('click', () => {
+            document.getElementById('imageLogModal').classList.remove('show');
+        });
+        
+        // 모달 배경 클릭 시 닫기
+        document.getElementById('imageLogModal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'imageLogModal') {
+                document.getElementById('imageLogModal').classList.remove('show');
+            }
+        });
+    }
+};
+
+// refreshBtn이 이미지 탭 새로고침도 담당하도록 수정
+const originalRefreshHandler = elements.refreshBtn?.onclick;
+if (elements.refreshBtn) {
+    elements.refreshBtn.addEventListener('click', async () => {
+        // 현재 활성화된 탭 확인
+        const activeTab = document.querySelector('.tab-content.active');
+        if (activeTab && activeTab.id === 'imageAnalysisTab') {
+            // 이미지 탭이 활성화되어 있으면
+            await imageAnalysis.loadImageStats();
+            await imageAnalysis.loadImageLogs();
+        } else {
+            // 텍스트 탭이 활성화되어 있으면 기존 동작
+            await dataLoader.loadStats();
+            await dataLoader.loadLogs();
+        }
+    });
+}
+
 // 초기화
 const app = {
     async init() {
         try {
             eventListeners.init();
+            tabs.init();
+            imageEventListeners.init();
             await dataLoader.loadStats();
             await dataLoader.loadLogs();
         } catch (error) {
@@ -1799,5 +2270,8 @@ const app = {
     document.addEventListener('DOMContentLoaded', () => {
         app.init();
     });
+    
+    // imageAnalysis를 전역으로 노출 (버튼 onclick에서 사용)
+    window.imageAnalysis = imageAnalysis;
 })();
 
