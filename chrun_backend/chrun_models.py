@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Float, Text, Boolean, Index
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -68,7 +69,7 @@ class ChurnAnalysis(Base):
     
     # 설정 및 결과 (JSON)
     analysis_config = Column(Text, nullable=True)  # JSON string
-    results = Column(Text, nullable=True)  # JSON string
+    results = Column(LONGTEXT, nullable=True)  # JSON string (LONGTEXT for large data)
     
     # 실행 정보
     execution_time_seconds = Column(Float, nullable=True)

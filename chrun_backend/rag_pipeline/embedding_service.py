@@ -19,12 +19,13 @@ EMBEDDING_DIMENSION = 1536  # text-embedding-3-small의 기본 차원
 logger = logging.getLogger(__name__)
 
 
-def get_embedding(text: str) -> List[float]:
+def get_embedding(text: str, max_length: int = 8191) -> List[float]:
     """
     텍스트를 벡터 임베딩으로 변환하는 함수
     
     Args:
         text (str): 임베딩을 생성할 텍스트
+        max_length (int): 최대 텍스트 길이 (기본값: 8191)
         
     Returns:
         List[float]: 벡터 임베딩 (1536차원)
@@ -36,6 +37,7 @@ def get_embedding(text: str) -> List[float]:
     Note:
         - OpenAI API 키가 없으면 더미 벡터를 반환합니다
         - 실제 운영 환경에서는 반드시 유효한 API 키를 설정해야 합니다
+        - text-embedding-3-small의 최대 토큰은 8191
     """
     
     # 입력 검증
@@ -93,6 +95,167 @@ def get_embedding(text: str) -> List[float]:
         # - 텍스트 길이 초과: 400 Bad Request
         
         return _get_dummy_embedding()
+
+
+def get_contextual_embedding(
+    sentence: str, 
+    prev_sentence: str = "", 
+    next_sentence: str = "",
+    context_format: str = "structured"
+) -> List[float]:
+    """
+    문맥을 포함한 임베딩을 생성하는 함수 (⭐ RAG 성능 향상 핵심)
+    
+    앞뒤 문장 정보를 함께 임베딩하여 문장 독립성 문제를 해결하고
+    검색 정확도를 향상시킵니다.
+    
+    Args:
+        sentence (str): 핵심 문장 (임베딩할 주요 문장)
+        prev_sentence (str): 이전 문장 (문맥 제공)
+        next_sentence (str): 다음 문장 (문맥 제공)
+        context_format (str): 문맥 포맷 방식
+            - "structured": 구조화된 형식 (기본값)
+            - "natural": 자연어 형식 (단순 연결)
+            - "separator": 구분자 형식 (<SEP> 토큰 사용)
+    
+    Returns:
+        List[float]: 문맥이 주입된 임베딩 벡터 (1536차원)
+    
+    Examples:
+        >>> embedding = get_contextual_embedding(
+        ...     sentence="다른 곳 갈까봐요",
+        ...     prev_sentence="3.5년 있었는데.",
+        ...     next_sentence=""
+        ... )
+        
+        >>> # 구조화된 포맷 예시:
+        >>> # [이전] 3.5년 있었는데.
+        >>> # [현재] 다른 곳 갈까봐요
+    """
+    
+    # 입력 검증
+    if not sentence or not sentence.strip():
+        logger.warning("핵심 문장이 비어있습니다. 기본 임베딩을 반환합니다.")
+        return get_embedding(sentence)
+    
+    # 문맥 텍스트 구성
+    if context_format == "structured":
+        # 구조화된 형식 (추천)
+        context_parts = []
+        if prev_sentence:
+            context_parts.append(f"[이전] {prev_sentence.strip()}")
+        context_parts.append(f"[현재] {sentence.strip()}")
+        if next_sentence:
+            context_parts.append(f"[다음] {next_sentence.strip()}")
+        context_text = "\n".join(context_parts)
+        
+    elif context_format == "natural":
+        # 자연어 형식 (단순 연결)
+        context_parts = []
+        if prev_sentence:
+            context_parts.append(prev_sentence.strip())
+        context_parts.append(sentence.strip())
+        if next_sentence:
+            context_parts.append(next_sentence.strip())
+        context_text = " ".join(context_parts)
+        
+    elif context_format == "separator":
+        # 구분자 형식 (<SEP> 토큰)
+        context_parts = []
+        if prev_sentence:
+            context_parts.append(prev_sentence.strip())
+        context_parts.append(sentence.strip())
+        if next_sentence:
+            context_parts.append(next_sentence.strip())
+        context_text = " <SEP> ".join(context_parts)
+        
+    else:
+        logger.warning(f"알 수 없는 context_format: {context_format}. 기본값 사용")
+        return get_contextual_embedding(sentence, prev_sentence, next_sentence, "structured")
+    
+    # 길이 제한 (OpenAI 토큰 제한)
+    max_chars = 30000  # 대략 8191 토큰 (안전 마진)
+    if len(context_text) > max_chars:
+        logger.warning(f"문맥 텍스트가 너무 김: {len(context_text)} 문자. 잘라냅니다.")
+        context_text = context_text[:max_chars]
+    
+    logger.debug(f"문맥 주입 임베딩 생성: {len(context_text)} 문자")
+    
+    # 임베딩 생성
+    return get_embedding(context_text)
+
+
+def get_contextual_embedding_with_metadata(
+    sentence_data: dict,
+    context_format: str = "structured",
+    include_user_context: bool = False
+) -> List[float]:
+    """
+    메타데이터를 포함한 문맥적 임베딩 생성 (⭐⭐ 최고급 버전)
+    
+    TextSplitter에서 생성한 강화된 메타데이터를 활용하여
+    더욱 풍부한 문맥 정보를 임베딩에 주입합니다.
+    
+    Args:
+        sentence_data (dict): TextSplitter에서 생성한 문장 딕셔너리
+            - sentence: 핵심 문장
+            - prev_sentence: 이전 문장
+            - next_sentence: 다음 문장
+            - user_activity_trend: 사용자 활동 추이 (선택)
+            - user_prev_posts_count: 이전 게시글 수 (선택)
+        context_format (str): 문맥 포맷 방식
+        include_user_context (bool): 사용자 컨텍스트 포함 여부
+    
+    Returns:
+        List[float]: 풍부한 문맥이 주입된 임베딩 벡터
+    
+    Examples:
+        >>> sentence_data = {
+        ...     "sentence": "다른 곳 갈까봐요",
+        ...     "prev_sentence": "3.5년 있었는데.",
+        ...     "next_sentence": "",
+        ...     "user_activity_trend": "감소",
+        ...     "user_prev_posts_count": 45
+        ... }
+        >>> embedding = get_contextual_embedding_with_metadata(
+        ...     sentence_data,
+        ...     include_user_context=True
+        ... )
+    """
+    
+    sentence = sentence_data.get("sentence", "")
+    prev_sentence = sentence_data.get("prev_sentence", "")
+    next_sentence = sentence_data.get("next_sentence", "")
+    
+    # 기본 문맥 임베딩
+    if not include_user_context:
+        return get_contextual_embedding(sentence, prev_sentence, next_sentence, context_format)
+    
+    # 사용자 컨텍스트 포함 버전
+    context_parts = []
+    
+    # 앞뒤 문장
+    if prev_sentence:
+        context_parts.append(f"[이전] {prev_sentence.strip()}")
+    context_parts.append(f"[현재] {sentence.strip()}")
+    if next_sentence:
+        context_parts.append(f"[다음] {next_sentence.strip()}")
+    
+    # 사용자 활동 정보 (선택적)
+    user_context_parts = []
+    if "user_activity_trend" in sentence_data:
+        user_context_parts.append(f"활동추이: {sentence_data['user_activity_trend']}")
+    if "user_prev_posts_count" in sentence_data:
+        user_context_parts.append(f"게시글: {sentence_data['user_prev_posts_count']}개")
+    
+    if user_context_parts:
+        context_parts.append(f"[사용자] {', '.join(user_context_parts)}")
+    
+    context_text = "\n".join(context_parts)
+    
+    logger.debug(f"메타데이터 포함 임베딩 생성: {len(context_text)} 문자")
+    
+    return get_embedding(context_text)
 
 
 def _get_dummy_embedding() -> List[float]:

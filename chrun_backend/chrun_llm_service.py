@@ -30,6 +30,8 @@ class LLMInsightGenerator:
     
     def __init__(self):
         self.client = None
+        self.model = "gpt-4o-mini"  # 기본 모델 (캐시 키에 사용)
+        self.prompt_version = "v1"  # 프롬프트 버전 (캐시 키에 사용)
         self._initialize_client()
     
     def _initialize_client(self):

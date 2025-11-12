@@ -115,6 +115,15 @@ async def messages_page(request: Request):
 #         {"request": request, "title": "RAG 위험도 분석"}
 #     )
 
+
+@router.get("/admin/rag-auto", response_class=HTMLResponse)
+async def admin_rag_auto(request: Request):
+    """자동 RAG 판정 결과 페이지"""
+    return templates.TemplateResponse(
+        "pages/admin_rag_auto.html",
+        {"request": request, "title": "자동 RAG 판정 결과"}
+    )
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """로그인 페이지"""
@@ -171,6 +180,14 @@ async def admin_reports_page(request: Request):
         {"request": request, "title": "관리자 - 신고 관리"}
     )
 
+@router.get("/admin/churn-rag-analysis", response_class=HTMLResponse)
+async def churn_rag_analysis(request: Request):
+    """이탈자 RAG 분석 통합 페이지"""
+    return templates.TemplateResponse(
+        "pages/churn_rag_analysis.html",
+        {"request": request, "title": "이탈자 RAG 분석"}
+    )
+    
 @router.get("/chatbot", response_class=HTMLResponse)
 async def chatbot_page(request: Request):
     """AI 챗봇 페이지"""

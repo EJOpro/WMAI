@@ -7,14 +7,27 @@
 
 import hashlib
 import json
-from typing import Dict, List, Optional
+import os
+import time
+import logging
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-import chromadb
-from chromadb.config import Settings
+logger = logging.getLogger(__name__)
+
+# ChromaDB lazy import - pydantic 버전 충돌 우회
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMADB_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"ChromaDB import 실패: {e}. 벡터 검색 기능이 비활성화됩니다.")
+    chromadb = None
+    Settings = None
+    CHROMADB_AVAILABLE = False
 
 
-def get_client(persist_dir: str = "./chroma_store") -> chromadb.ClientAPI:
+def get_client(persist_dir: str = "./chroma_store") -> Any:
     """
     ChromaDB 클라이언트를 생성하고 반환합니다.
     
@@ -24,8 +37,15 @@ def get_client(persist_dir: str = "./chroma_store") -> chromadb.ClientAPI:
     Returns:
         chromadb.ClientAPI: ChromaDB 클라이언트 인스턴스
     """
+    if not CHROMADB_AVAILABLE:
+        logger.error("ChromaDB를 사용할 수 없습니다. 클라이언트를 생성할 수 없습니다.")
+        return None
+    
+    absolute_path = os.path.abspath(persist_dir)
+    os.makedirs(absolute_path, exist_ok=True)
+
     client = chromadb.PersistentClient(
-        path=persist_dir,
+        path=absolute_path,
         settings=Settings(
             anonymized_telemetry=False,  # 텔레메트리 비활성화
             allow_reset=True  # 개발 환경에서 리셋 허용
@@ -34,7 +54,7 @@ def get_client(persist_dir: str = "./chroma_store") -> chromadb.ClientAPI:
     return client
 
 
-def get_collection(client: chromadb.ClientAPI, name: str = "confirmed_risk") -> chromadb.Collection:
+def get_collection(client: Any, name: str = "confirmed_risk") -> Any:
     """
     지정된 이름의 컬렉션을 생성하거나 기존 컬렉션을 반환합니다.
     
@@ -121,13 +141,52 @@ def upsert_confirmed_chunk(
         "confirmed": bool(meta.get("confirmed", True))
     }
     
+    # 추가 메타데이터 필드 (있는 경우만 추가)
+    optional_fields = [
+        # 기존 필드
+        "embed_model_v", "embed_dimension", "ts",
+        "who_labeled", "segment", "reason",
+        "risk_level", "risk_factors", "sentence_index", "analyzed_at",
+        
+        # ⭐ 문맥 정보 (KSS + 메타데이터 강화)
+        "prev_sentence",           # 이전 문장
+        "next_sentence",           # 다음 문장
+        "total_sentences",         # 전체 문장 수
+        "is_first",                # 첫 문장 여부
+        "is_last",                 # 마지막 문장 여부
+        "splitter_method",         # 분할 방법 (kss/regex)
+        
+        # ⭐ 사용자 컨텍스트
+        "user_activity_trend",     # 활동 추이
+        "user_prev_posts_count",   # 이전 게시글 수
+        "user_join_date",          # 가입일
+        "user_recent_activity_score",  # 최근 활동 점수
+        
+        # ⭐ 이탈 분석 메타데이터 (LLM 분석 결과)
+        "churn_stage",             # 이탈 단계 (1-5단계)
+        "belongingness",           # 소속감 (강함/보통/약함/없음)
+        "emotion",                 # 감정 (만족/무관심/짜증/실망/포기)
+        "urgency",                 # 긴급성 (IMMEDIATE/SOON/EVENTUAL/UNCLEAR)
+        "recovery_chance",         # 회복 가능성 (HIGH/MEDIUM/LOW)
+        
+        # 임베딩 관련
+        "embedding_method",        # 임베딩 방법 (basic/contextual/metadata)
+        "context_format"           # 문맥 포맷 (structured/natural/separator)
+    ]
+    for field in optional_fields:
+        if field in meta:
+            validated_meta[field] = meta[field]
+    
     # ChromaDB에 upsert (동일 ID면 업데이트, 없으면 추가)
+    upsert_start = time.perf_counter()
     collection.upsert(
         ids=[chunk_id],
         embeddings=[embedding],
         metadatas=[validated_meta],
         documents=[validated_meta["sentence"]]  # 문장을 document로 저장
     )
+    upsert_elapsed = (time.perf_counter() - upsert_start) * 1000
+    logger.info("[VectorDB] upsert 완료: %s (%.2f ms)", chunk_id, upsert_elapsed)
 
 
 def search_similar(
@@ -162,11 +221,14 @@ def search_similar(
         return []
     
     # 유사도 검색 수행
+    query_start = time.perf_counter()
     results = collection.query(
         query_embeddings=[embedding],
         n_results=min(top_k, count),  # 저장된 문서 수보다 많이 요청하지 않도록
         include=["metadatas", "documents", "distances"]
     )
+    query_elapsed = (time.perf_counter() - query_start) * 1000
+    logger.info("[VectorDB] 검색 수행 (top_k=%d, elapsed=%.2f ms)", top_k, query_elapsed)
     
     # 결과 포맷팅
     formatted_results = []
