@@ -21,8 +21,8 @@ from pathlib import Path
 
 router = APIRouter(tags=["board"])
 
-# 백그라운드 작업용 executor
-background_executor = ThreadPoolExecutor(max_workers=4)
+# 백그라운드 작업용 executor (ML 분석용 스레드 풀 확장)
+background_executor = ThreadPoolExecutor(max_workers=8)
 
 # 이미지 업로드 설정
 UPLOAD_DIR = Path("app/static/uploads/board")
@@ -223,8 +223,8 @@ def should_block_content(result: dict) -> Tuple[bool, str]:
     if final_score >= 90 and final_confidence >= 70:
         return True, "부적절한 내용이 포함되어 있습니다"
     
-    # 차단 기준 3: 스팸 점수 >= 70 AND 신뢰도 >= 70
-    if spam_score >= 70 and spam_confidence >= 70:
+    # 차단 기준 3: 스팸 점수 >= 80 AND 신뢰도 >= 70
+    if spam_score >= 80 and spam_confidence >= 70:
         return True, "스팸으로 의심되는 내용이 포함되어 있습니다"
     
     return False, ""
@@ -251,8 +251,9 @@ async def analyze_and_log_content(text: str, ip_address: str = None, user_agent:
         # 분석 시간 측정 시작
         start_time = time.time()
         
-        # 분석 실행
-        result = analyzer.analyze(text)
+        # 분석 실행 (블로킹 방지를 위해 별도 스레드에서 실행)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(background_executor, analyzer.analyze, text)
         
         # 응답 시간 계산
         response_time = time.time() - start_time
@@ -261,37 +262,44 @@ async def analyze_and_log_content(text: str, ip_address: str = None, user_agent:
         should_block, block_reason = should_block_content(result)
         status = 'blocked' if should_block else 'exposed'
         
-        # 로그 저장 (ethics_logs 테이블)
+        # 로그 저장 (ethics_logs 테이블) - 비동기로 처리하여 응답 속도 개선
         try:
-            log_id = db_logger.log_analysis(
-                text=text,
-                score=result['final_score'],
-                confidence=result['final_confidence'],
-                spam=result['spam_score'],
-                spam_confidence=result['spam_confidence'],
-                types=result.get('types', []),
-                ip_address=ip_address,
-                user_agent=user_agent,
-                response_time=response_time,
-                rag_applied=result.get('adjustment_applied', False),
-                auto_blocked=result.get('auto_blocked', False)
+            loop = asyncio.get_event_loop()
+            log_id = await loop.run_in_executor(
+                background_executor,
+                lambda: db_logger.log_analysis(
+                    text=text,
+                    score=result['final_score'],
+                    confidence=result['final_confidence'],
+                    spam=result['spam_score'],
+                    spam_confidence=result['spam_confidence'],
+                    types=result.get('types', []),
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    response_time=response_time,
+                    rag_applied=result.get('adjustment_applied', False),
+                    auto_blocked=result.get('auto_blocked', False)
+                )
             )
             
             # RAG 상세 정보 저장 (RAG가 적용된 경우)
             if result.get('adjustment_applied', False) and log_id:
                 try:
-                    db_logger.log_rag_details(
-                        ethics_log_id=log_id,
-                        similar_case_count=result.get('similar_cases_count', 0),
-                        max_similarity=result.get('max_similarity', 0.0),  # 이미 0-1 범위
-                        original_immoral_score=result.get('base_score', result['final_score']),
-                        original_spam_score=result.get('base_spam_score', result.get('spam_score', 0.0)),  # RAG 보정 전 스팸 점수
-                        adjusted_immoral_score=result.get('adjusted_immoral_score', result['final_score']),
-                        adjusted_spam_score=result.get('adjusted_spam_score', result['spam_score']),
-                        adjustment_weight=result.get('adjustment_weight', 0.0),
-                        confidence_boost=0.0,  # 별도 계산 필요 시 추가
-                        similar_cases=result.get('rag_similar_cases', []),
-                        rag_response_time=response_time
+                    await loop.run_in_executor(
+                        background_executor,
+                        lambda: db_logger.log_rag_details(
+                            ethics_log_id=log_id,
+                            similar_case_count=result.get('similar_cases_count', 0),
+                            max_similarity=result.get('max_similarity', 0.0),  # 이미 0-1 범위
+                            original_immoral_score=result.get('base_score', result['final_score']),
+                            original_spam_score=result.get('base_spam_score', result.get('spam_score', 0.0)),  # RAG 보정 전 스팸 점수
+                            adjusted_immoral_score=result.get('adjusted_immoral_score', result['final_score']),
+                            adjusted_spam_score=result.get('adjusted_spam_score', result['spam_score']),
+                            adjustment_weight=result.get('adjustment_weight', 0.0),
+                            confidence_boost=0.0,  # 별도 계산 필요 시 추가
+                            similar_cases=result.get('rag_similar_cases', []),
+                            rag_response_time=response_time
+                        )
                     )
                 except Exception as rag_log_error:
                     print(f"[WARN] RAG 로그 저장 실패: {rag_log_error}")
@@ -460,10 +468,15 @@ async def analyze_images_hybrid(
         block_reason = ""
         
         try:
-            # 1차 필터: NSFW 검사 (빠르고 저렴)
+            # 1차 필터: NSFW 검사 (빠르고 저렴) - 비동기 처리
             nsfw_detector = get_nsfw_detector()
             if nsfw_detector:
-                nsfw_result = nsfw_detector.analyze(str(image_path))
+                loop = asyncio.get_event_loop()
+                nsfw_result = await loop.run_in_executor(
+                    background_executor,
+                    nsfw_detector.analyze,
+                    str(image_path)
+                )
                 print(f"[INFO] NSFW 검사: {image['filename']}, "
                       f"NSFW={nsfw_result.get('is_nsfw')}, "
                       f"신뢰도={nsfw_result.get('confidence', 0):.1f}%")
@@ -492,7 +505,13 @@ async def analyze_images_hybrid(
             if should_use_vision:
                 vision_analyzer = get_vision_analyzer()
                 if vision_analyzer:
-                    vision_result = vision_analyzer.analyze_image(str(image_path))
+                    # Vision API 분석 비동기 처리 (블로킹 방지)
+                    loop = asyncio.get_event_loop()
+                    vision_result = await loop.run_in_executor(
+                        background_executor,
+                        vision_analyzer.analyze_image,
+                        str(image_path)
+                    )
                     print(f"[INFO] Vision API 검사: {image['filename']}, "
                           f"비윤리={vision_result.get('immoral_score', 0):.1f}, "
                           f"스팸={vision_result.get('spam_score', 0):.1f}")
@@ -506,19 +525,23 @@ async def analyze_images_hybrid(
             # 분석 시간 계산
             response_time = time.time() - start_time
             
-            # 로그 저장
-            log_id = image_logger.log_analysis(
-                filename=image['filename'],
-                original_name=image['original_name'],
-                file_size=image['size'],
-                board_id=board_id,
-                nsfw_result=nsfw_result,
-                vision_result=vision_result,
-                is_blocked=is_blocked,
-                block_reason=block_reason,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                response_time=response_time
+            # 로그 저장 (비동기 처리)
+            loop = asyncio.get_event_loop()
+            log_id = await loop.run_in_executor(
+                background_executor,
+                lambda: image_logger.log_analysis(
+                    filename=image['filename'],
+                    original_name=image['original_name'],
+                    file_size=image['size'],
+                    board_id=board_id,
+                    nsfw_result=nsfw_result,
+                    vision_result=vision_result,
+                    is_blocked=is_blocked,
+                    block_reason=block_reason,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    response_time=response_time
+                )
             )
             
             if log_id:
@@ -1264,7 +1287,7 @@ async def create_post(
             analyze_churn_risk_and_store,
             post_id,
             user['user_id'],
-            data.content,
+            content,
             datetime.now().isoformat()
         )
         print(f"[INFO] 게시글 {post_id} - 백그라운드 이탈 위험도 분석 시작됨")

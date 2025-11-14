@@ -492,67 +492,15 @@
     // API 요청 헬퍼 함수
     async function apiRequest(endpoint) {
         try {
-            // 실제 API 호출 시도
-            const now = new Date();
-            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            // ✅ 실제 /api/trends 엔드포인트 호출
+            const response = await fetch(endpoint);
             
-            const wordcloudResponse = await fetch(`http://localhost:8001/api/v1/community/wordcloud?start=${weekAgo.toISOString()}&end=${now.toISOString()}&top_k=50`);
-            
-            if (wordcloudResponse.ok) {
-                const wordcloudData = await wordcloudResponse.json();
-                
-                // 한글 인코딩 문제로 임시 테스트 데이터 사용
-                const testKeywords = [
-                    { word: '건강', count: 15, weight: 1.0 },
-                    { word: '요리', count: 12, weight: 0.8 },
-                    { word: '육아', count: 10, weight: 0.67 },
-                    { word: '여행', count: 8, weight: 0.53 },
-                    { word: '운동', count: 7, weight: 0.47 },
-                    { word: '독서', count: 6, weight: 0.4 },
-                    { word: '음식', count: 5, weight: 0.33 },
-                    { word: '취미', count: 4, weight: 0.27 },
-                    { word: '일상', count: 3, weight: 0.2 },
-                    { word: '공부', count: 2, weight: 0.13 }
-                ];
-
-                // 트렌드 변화 계산
-                const trends = testKeywords.map((word, index) => ({
-                    keyword: word.word,
-                    mentions: word.count,
-                    change: Math.random() * 20 - 10,
-                    category: 'general'
-                }));
-
-                const risingTrends = trends.filter(t => t.change > 0).length;
-                const newTrends = Math.floor(testKeywords.length * 0.2); // 20%를 신규로 가정
-
-                // 타임라인 데이터 생성 (최근 7일)
-                const timelineData = [];
-                const now = new Date();
-                for (let i = 6; i >= 0; i--) {
-                    const date = new Date(now);
-                    date.setDate(date.getDate() - i);
-                    timelineData.push({
-                        date: date.toISOString().split('T')[0],
-                        count: Math.floor(Math.random() * 30) + 20 // 20~50 사이 랜덤 값
-                    });
-                }
-
-                return {
-                    source: 'test_data',
-                    summary: {
-                        total_posts: wordcloudData.total_posts || 23,
-                        total_comments: wordcloudData.total_comments || 47,
-                        unique_keywords: testKeywords.length,
-                        total_trends: testKeywords.length,
-                        new_trends: newTrends,
-                        rising_trends: risingTrends
-                    },
-                    keywords: testKeywords,
-                    trends: trends,
-                    wordcloud: testKeywords,
-                    timeline: timelineData
-                };
+            if (response.ok) {
+                const data = await response.json();
+                console.log('✅ API 응답 성공:', data.source);
+                return data;
+            } else {
+                console.error('❌ API 응답 실패:', response.status);
             }
         } catch (error) {
             console.error('API 요청 오류:', error);

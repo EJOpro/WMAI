@@ -330,31 +330,16 @@
 <script src="{{ url_for('static', path='/js/chrun_script.js') }}"></script>
 <script>
 // 간단한 탭 전환 (Bootstrap 없이)
-document.addEventListener('DOMContentLoaded', function() {
-    // 탭 전환 기능
-    document.querySelectorAll('.tab-link').forEach(function(tab){
-        tab.addEventListener('click', function(e){
-            e.preventDefault();
-            const target = this.getAttribute('data-tab');
-            document.querySelectorAll('.tab-link').forEach(el=>el.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(el=>el.classList.remove('active'));
-            this.classList.add('active');
-            const pane = document.querySelector(target);
-            if (pane) {
-                pane.classList.add('active');
-            }
-        });
-    });
-    
-    // 초기 상태 확인: 대시보드 탭이 active인지 확인
-    const dashboardPane = document.querySelector('#dashboard');
-    const reportPane = document.querySelector('#report');
-    if (dashboardPane && dashboardPane.classList.contains('active')) {
-        dashboardPane.style.display = 'block';
-    }
-    if (reportPane && !reportPane.classList.contains('active')) {
-        reportPane.style.display = 'none';
-    }
+document.querySelectorAll('.tab-link').forEach(function(tab){
+  tab.addEventListener('click', function(e){
+    e.preventDefault();
+    const target = this.getAttribute('data-tab');
+    document.querySelectorAll('.tab-link').forEach(el=>el.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(el=>el.classList.remove('active'));
+    this.classList.add('active');
+    const pane = document.querySelector(target);
+    if (pane) pane.classList.add('active');
+  });
 });
 </script>
 {% endblock %}
