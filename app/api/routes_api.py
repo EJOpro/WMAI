@@ -145,235 +145,227 @@ async def get_bounce_metrics():
 @router.get("/trends")
 async def get_trends(limit: int = Query(100, ge=1, le=1000)):
     """
-    실제 트렌드 데이터 반환 (dad.dothome.co.kr API 연동)
+    MySQL 데이터베이스에서 트렌드 데이터 반환
     
-    **시니어의 설명:**
-    - 외부 API에서 실제 인기 검색어 데이터를 가져옴
-    - 키워드 정규화 (검색했음→검색, 검색어→검색)
+    **설명:**
+    - trend_keywords 테이블에서 최근 7일간 키워드 데이터 조회
     - 날짜별 타임라인 생성
-    - 실제 증감률 계산
+    - 증감률 계산 (전일 대비)
+    - 게시글/댓글 통계 포함
     """
-    
-    # ⭐ 키워드 정규화 매핑 (자연어 → 키워드)
-    KEYWORD_NORMALIZATION = {
-        "검색했음": "검색",
-        "검색하기": "검색",
-        "검색중": "검색",
-        "검색어": "검색",
-        "검색어들": "검색",
-        "안녕하세요": "인사",
-        "안녕": "인사",
-        "ㅎㅇ": "인사",
-    }
-    
-    def normalize_keyword(word: str) -> str:
-        """키워드 정규화"""
-        word = word.strip()
-        return KEYWORD_NORMALIZATION.get(word, word)
+    from app.database import get_db_connection
     
     try:
-        print(f"\n[DEBUG] Calling dad.dothome.co.kr API with limit={limit}")
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # ✅ 1. 실제 인기 검색어 API 호출 (standalone 버전)
-            url = "https://dad.dothome.co.kr/adm/popular_api_standalone.php"
-            print(f"[DEBUG] URL: {url}")
+        print(f"\n[INFO] MySQL에서 트렌드 데이터 조회 (limit={limit})")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
             
-            response = await client.get(url, params={"limit": limit})
-            print(f"[DEBUG] Response status: {response.status_code}")
-            print(f"[DEBUG] Response content-type: {response.headers.get('content-type')}")
+            # 1. 최근 7일간의 전체 키워드 조회 (날짜별)
+            seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
             
-            response.raise_for_status()
+            cursor.execute("""
+                SELECT 
+                    keyword,
+                    SUM(search_count) as total_count,
+                    search_date,
+                    category
+                FROM trend_keywords
+                WHERE search_date >= %s
+                GROUP BY keyword, search_date, category
+                ORDER BY search_date DESC, total_count DESC
+            """, (seven_days_ago,))
             
-            data = response.json()
-            print(f"[DEBUG] JSON parsed successfully")
-            print(f"[DEBUG] success={data.get('success')}, data_count={len(data.get('data', []))}")
+            keyword_data = cursor.fetchall()
             
-            if not data.get("success", False):
-                raise Exception("API returned error")
+            # 2. 키워드별 총 집계 (전체 기간)
+            cursor.execute("""
+                SELECT 
+                    keyword,
+                    SUM(search_count) as total_count,
+                    category
+                FROM trend_keywords
+                WHERE search_date >= %s
+                GROUP BY keyword, category
+                ORDER BY total_count DESC
+                LIMIT %s
+            """, (seven_days_ago, limit))
             
-            # ✅ 2. 게시글/댓글 통계 API 호출
-            stats_url = "https://dad.dothome.co.kr/adm/board_stats_api.php"
-            print(f"[DEBUG] Fetching board stats from: {stats_url}")
+            top_keywords = cursor.fetchall()
             
-            stats_response = await client.get(stats_url)
-            stats_data = stats_response.json()
+            # 3. 게시글/댓글 통계 조회
+            cursor.execute("""
+                SELECT 
+                    COALESCE(total_posts, 0) as total_posts,
+                    COALESCE(total_comments, 0) as total_comments
+                FROM trend_stats_cache
+                WHERE stat_date = CURDATE()
+                LIMIT 1
+            """)
             
-            total_posts = 0
-            total_comments = 0
+            stats = cursor.fetchone()
             
-            if stats_data.get("success"):
-                total_posts = stats_data["data"]["total_posts"]
-                total_comments = stats_data["data"]["total_comments"]
-                print(f"[DEBUG] Board stats: posts={total_posts}, comments={total_comments}")
-                
-                # 디버그 정보 출력
-                if "debug" in stats_data:
-                    print(f"[DEBUG] Tables found: {stats_data['debug'].get('tables_found', [])}")
+            if stats:
+                total_posts = stats['total_posts']
+                total_comments = stats['total_comments']
             else:
-                print(f"[DEBUG] Board stats API failed, using defaults")
-            
-            # 데이터 변환
-            api_data = data.get("data", [])
-            print(f"[DEBUG] Converting {len(api_data)} items to keywords")
-            
-            # ⭐ 키워드 정규화 + 빈도 집계
-            word_counts = Counter()
-            date_word_counts = {}  # 날짜별 키워드 빈도
-            
-            for item in api_data:
-                word = item.get("word", "").strip()
-                date = item.get("date", "")
+                # 캐시가 없으면 실제 테이블에서 조회
+                cursor.execute("SELECT COUNT(*) as cnt FROM board")
+                posts_result = cursor.fetchone()
+                total_posts = posts_result['cnt'] if posts_result else 0
                 
-                if word:
-                    # 키워드 정규화
-                    normalized_word = normalize_keyword(word)
-                    word_counts[normalized_word] += 1
-                    
-                    # 날짜별 집계
-                    if date not in date_word_counts:
-                        date_word_counts[date] = Counter()
-                    date_word_counts[date][normalized_word] += 1
+                cursor.execute("SELECT COUNT(*) as cnt FROM comment")
+                comments_result = cursor.fetchone()
+                total_comments = comments_result['cnt'] if comments_result else 0
             
-            # 빈도순으로 정렬하여 키워드 생성
-            keywords = [
-                {
-                    "word": word,
-                    "count": count
-                }
-                for word, count in word_counts.most_common()
-            ]
-            
-            print(f"[DEBUG] Top 5 keywords (after normalization): {keywords[:5]}")
-            
-            # ⭐ 증감률 계산 (날짜별 비교)
-            dates = sorted(date_word_counts.keys())
-            trends = []
-            
-            for kw in keywords[:10]:
-                word = kw["word"]
-                
-                # 최근 날짜와 이전 날짜의 검색 횟수 비교
-                if len(dates) >= 2:
-                    recent_count = date_word_counts[dates[-1]].get(word, 0)
-                    previous_count = date_word_counts[dates[-2]].get(word, 0)
-                    
-                    if previous_count > 0:
-                        change = ((recent_count - previous_count) / previous_count) * 100
-                    else:
-                        change = 100.0 if recent_count > 0 else 0.0
-                else:
-                    change = 0.0
-                
-                # 카테고리 자동 분류
-                if change > 50:
-                    category = "급상승"
-                elif change > 0:
-                    category = "상승"
-                elif change < -50:
-                    category = "급감"
-                elif change < 0:
-                    category = "하락"
-                else:
-                    category = "유지"
-                
-                trends.append({
-                    "keyword": word,
-                    "mentions": kw["count"],
-                    "change": round(change, 1),
-                    "category": category
-                })
-            
-            # ⭐ 타임라인 데이터 생성 (날짜별 검색 횟수)
-            timeline = []
-            for date in sorted(dates):
-                total_count = sum(date_word_counts[date].values())
-                timeline.append({
-                    "date": date,
-                    "count": total_count
-                })
-            
-            # ⭐ 실제 통계 계산
-            total_searches = sum(word_counts.values())
-            unique_keywords = len(keywords)
-            
-            return {
-                "summary": {
-                    "total_posts": total_posts,             # ⭐ 실제 게시글 수
-                    "total_comments": total_comments,        # ⭐ 실제 댓글 수
-                    "total_searches": total_searches,        # 총 검색 횟수
-                    "unique_keywords": unique_keywords,      # 고유 키워드 수
-                    "total_trends": len(keywords),
-                    "new_trends": len([t for t in trends if t["change"] > 50]),
-                    "rising_trends": len([t for t in trends if t["change"] > 0])
-                },
-                "keywords": keywords,
-                "trends": trends,
-                "timeline": timeline,  # ⭐ 타임라인 데이터 추가!
-                "source": "dad.dothome.co.kr",
-                "timestamp": datetime.now().isoformat()
-            }
-            
-    except Exception as e:
-        # ⭐ 에러 발생 시 현실적인 Mock 데이터 반환 (로그인 문제 대응)
-        print(f"[INFO] Using mock data due to: {e}")
+            cursor.close()
         
-        # 현실적인 한국어 키워드 Mock 데이터
-        mock_keywords_pool = [
-            "인공지능", "ChatGPT", "블록체인", "메타버스", "NFT",
-            "빅데이터", "클라우드", "사이버보안", "딥러닝", "머신러닝",
-            "자율주행", "전기차", "테슬라", "삼성전자", "반도체",
-            "K-POP", "BTS", "축구", "야구", "배구",
-            "주식", "비트코인", "부동산", "금리", "환율",
-            "날씨", "미세먼지", "코로나", "백신", "건강",
-            "다이어트", "운동", "요가", "필라테스", "헬스",
-            "맛집", "카페", "여행", "제주도", "부산",
-            "넷플릭스", "유튜브", "인스타그램", "틱톡", "페이스북",
-            "아이폰", "갤럭시", "게임", "LOL", "오버워치",
-            "영화", "드라마", "예능", "웹툰", "만화",
-            "패션", "뷰티", "화장품", "스킨케어", "메이크업",
-            "부동산", "전세", "월세", "아파트", "오피스텔",
-            "취업", "이직", "연봉", "면접", "자소서"
-        ]
+        print(f"[INFO] 조회된 키워드: {len(top_keywords)}개")
         
-        # 랜덤하게 limit개 선택하고 실제같은 빈도 부여
-        selected_keywords = random.sample(
-            mock_keywords_pool, 
-            min(limit, len(mock_keywords_pool))
-        )
-        
-        # 실제같은 검색 빈도 생성 (높은 빈도 ~ 낮은 빈도)
+        # 키워드 목록 생성
         keywords = [
             {
-                "word": kw,
-                "count": random.randint(1, 15)  # 현실적인 검색 횟수 (1~15회)
+                "word": item['keyword'],
+                "count": item['total_count']
             }
-            for kw in selected_keywords
+            for item in top_keywords
         ]
         
-        # 빈도순으로 정렬
-        keywords.sort(key=lambda x: x["count"], reverse=True)
+        # 날짜별 데이터 구조화
+        date_word_counts = {}
+        for item in keyword_data:
+            date = str(item['search_date'])
+            keyword = item['keyword']
+            count = item['total_count']
+            
+            if date not in date_word_counts:
+                date_word_counts[date] = {}
+            date_word_counts[date][keyword] = count
         
-        # 상위 10개로 트렌드 생성
-        trends = [
-            {
-                "keyword": kw["word"],
-                "mentions": kw["count"],  # ⭐ count와 동일하게!
-                "change": random.uniform(-30, 50),
-                "category": random.choice(["인기", "트렌드", "이슈", "급상승", "화제"])
-            }
-            for kw in keywords[:10]
-        ]
+        # 증감률 계산
+        dates = sorted(date_word_counts.keys())
+        trends = []
+        
+        for kw in keywords[:20]:  # 상위 20개만 트렌드 분석
+            word = kw["word"]
+            
+            # 최근 날짜와 이전 날짜의 검색 횟수 비교
+            if len(dates) >= 2:
+                recent_count = date_word_counts.get(dates[-1], {}).get(word, 0)
+                previous_count = date_word_counts.get(dates[-2], {}).get(word, 0)
+                
+                if previous_count > 0:
+                    change = ((recent_count - previous_count) / previous_count) * 100
+                else:
+                    change = 100.0 if recent_count > 0 else 0.0
+            else:
+                change = 0.0
+            
+            # 카테고리 자동 분류
+            if change > 50:
+                category = "급상승"
+            elif change > 0:
+                category = "상승"
+            elif change < -50:
+                category = "급감"
+            elif change < 0:
+                category = "하락"
+            else:
+                category = "유지"
+            
+            trends.append({
+                "keyword": word,
+                "mentions": kw["count"],
+                "change": round(change, 1),
+                "category": category
+            })
+        
+        # 타임라인 데이터 생성 (날짜별 총 검색 횟수)
+        timeline = []
+        for date in sorted(dates):
+            total_count = sum(date_word_counts[date].values())
+            timeline.append({
+                "date": date,
+                "count": total_count
+            })
+        
+        print(f"[INFO] 트렌드 {len(trends)}개, 타임라인 {len(timeline)}개 생성")
+        
+        # 통계 계산
+        total_searches = sum(kw['count'] for kw in keywords)
+        unique_keywords = len(keywords)
         
         return {
             "summary": {
+                "total_posts": total_posts,
+                "total_comments": total_comments,
+                "total_searches": total_searches,
+                "unique_keywords": unique_keywords,
                 "total_trends": len(keywords),
-                "new_trends": len([t for t in trends if t["change"] > 20]),
+                "new_trends": len([t for t in trends if t["change"] > 50]),
                 "rising_trends": len([t for t in trends if t["change"] > 0])
             },
             "keywords": keywords,
             "trends": trends,
-            "source": "mock_data",
-            "note": "API 인증 문제로 Mock 데이터 사용 중",
+            "timeline": timeline,
+            "source": "mysql",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[ERROR] MySQL 트렌드 데이터 조회 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Fallback: 간단한 더미 데이터 반환
+        print("[FALLBACK] 더미 데이터 사용")
+        
+        mock_keywords = [
+            {"word": "인공지능", "count": 450},
+            {"word": "챗GPT", "count": 380},
+            {"word": "검색", "count": 320},
+            {"word": "추천", "count": 280},
+            {"word": "Python", "count": 250},
+            {"word": "질문", "count": 230},
+            {"word": "맛집", "count": 210},
+            {"word": "여행", "count": 195},
+            {"word": "영화", "count": 180},
+            {"word": "리뷰", "count": 175}
+        ]
+        
+        mock_trends = [
+            {"keyword": "인공지능", "mentions": 450, "change": 12.5, "category": "상승"},
+            {"keyword": "챗GPT", "mentions": 380, "change": 8.6, "category": "상승"},
+            {"keyword": "검색", "mentions": 320, "change": 6.7, "category": "상승"},
+            {"keyword": "추천", "mentions": 280, "change": 7.7, "category": "상승"},
+            {"keyword": "Python", "mentions": 250, "change": 4.2, "category": "상승"}
+        ]
+        
+        mock_timeline = [
+            {"date": "2025-01-06", "count": 1450},
+            {"date": "2025-01-07", "count": 1680},
+            {"date": "2025-01-08", "count": 1920},
+            {"date": "2025-01-09", "count": 2150},
+            {"date": "2025-01-10", "count": 2380},
+            {"date": "2025-01-11", "count": 2610},
+            {"date": "2025-01-12", "count": 2850}
+        ]
+        
+        return {
+            "summary": {
+                "total_posts": 1250,
+                "total_comments": 6780,
+                "total_searches": sum(k['count'] for k in mock_keywords),
+                "unique_keywords": len(mock_keywords),
+                "total_trends": len(mock_keywords),
+                "new_trends": 0,
+                "rising_trends": 5
+            },
+            "keywords": mock_keywords,
+            "trends": mock_trends,
+            "timeline": mock_timeline,
+            "source": "fallback",
+            "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
 

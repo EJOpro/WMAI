@@ -15,6 +15,8 @@ write_engine = create_engine(
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
+    pool_recycle=3600,  # 1시간마다 연결 재생성
+    pool_timeout=10,  # 연결 대기 최대 10초
     echo=False
 )
 
@@ -25,6 +27,8 @@ read_engine = create_engine(
     pool_size=20,
     max_overflow=40,
     pool_pre_ping=True,
+    pool_recycle=3600,  # 1시간마다 연결 재생성
+    pool_timeout=5,  # 읽기는 더 빠른 타임아웃
     echo=False
 )
 

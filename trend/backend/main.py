@@ -44,11 +44,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis connection test failed: {e}")
     
-    # 집계 워커 시작 (선택적)
-    try:
-        aggregation_worker.start()
-    except Exception as e:
-        logger.warning(f"Aggregation worker failed to start: {e}")
+    # 집계 워커 시작 (선택적) - 비활성화됨 (성능 문제로)
+    # try:
+    #     aggregation_worker.start()
+    # except Exception as e:
+    #     logger.warning(f"Aggregation worker failed to start: {e}")
+    logger.info("Aggregation worker is DISABLED for performance")
     
     logger.info("TrendStream API started successfully")
     
@@ -56,10 +57,10 @@ async def lifespan(app: FastAPI):
     
     # 종료 시
     logger.info("Shutting down TrendStream API...")
-    try:
-        aggregation_worker.stop()
-    except Exception as e:
-        logger.warning(f"Error stopping aggregation worker: {e}")
+    # try:
+    #     aggregation_worker.stop()
+    # except Exception as e:
+    #     logger.warning(f"Error stopping aggregation worker: {e}")
     logger.info("TrendStream API stopped")
 
 

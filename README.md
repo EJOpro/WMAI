@@ -240,14 +240,25 @@ WMAI/
 
 ## 주요 기능 설명
 
-### 실시간 트렌드 API 연동
+### 트렌드 API (MySQL 기반)
 
-`/api/trends` 엔드포인트는 외부 API (dad.dothome.co.kr)에서 실제 데이터를 가져옵니다:
+`/api/trends` 엔드포인트는 MySQL 데이터베이스에서 트렌드 데이터를 조회합니다:
 
-1. **키워드 정규화** - "검색했음" → "검색" 등 자연어를 표준 키워드로 변환
+1. **데이터베이스 조회** - `trend_keywords` 테이블에서 최근 7일간 데이터 조회
 2. **날짜별 집계** - 타임라인 데이터 생성
-3. **증감률 계산** - 이전 날짜와 비교하여 트렌드 변화 분석
-4. **Mock Fallback** - API 오류 시 현실적인 Mock 데이터 반환
+3. **증감률 계산** - 전일 대비 트렌드 변화 분석
+4. **Fallback** - MySQL 오류 시 더미 데이터 반환
+
+**설정 방법:**
+```bash
+# 1. 테이블 생성
+mysql -u root -p wmai_db < db/migration_add_trend_keywords.sql
+
+# 2. 더미 데이터 삽입
+mysql -u root -p wmai_db < db/trend_dummy_data.sql
+```
+
+자세한 내용은 `db/README_TRENDS.md` 참조
 
 ### Ethics 분석 시스템 (고도화)
 
